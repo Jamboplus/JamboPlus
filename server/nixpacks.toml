@@ -1,0 +1,3 @@
+# better-sqlite3 needs a native toolchain when prebuilds are unavailable
+[phases.setup]
+nixPkgs = ["...", "python312", "gcc", "gnumake"]

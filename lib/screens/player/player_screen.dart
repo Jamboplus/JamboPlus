@@ -1,0 +1,1093 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:jamboplus/core/constants/app_strings.dart';
+import 'package:jamboplus/models/channel_model.dart';
+import 'package:jamboplus/models/playback_source.dart';
+import 'package:jamboplus/providers/channel_provider.dart';
+import 'package:jamboplus/providers/now_playing_provider.dart';
+import 'package:jamboplus/providers/user_provider.dart';
+import 'package:jamboplus/screens/main_shell.dart';
+import 'package:jamboplus/screens/player/player_theme.dart';
+import 'package:jamboplus/widgets/player/player_chrome.dart';
+import 'package:jamboplus/widgets/player/web_stream_player.dart';
+
+/// Full-screen, landscape-by-default video player with auto-hiding controls,
+/// green progress, a buffering animation, and an in-player live-channel
+/// switcher that swaps streams without leaving the player.
+class PlayerScreen extends ConsumerStatefulWidget {
+  const PlayerScreen({super.key});
+
+  static Future<void> open(BuildContext context) {
+    return Navigator.of(context).push(PageRouteBuilder(
+      opaque: true,
+      transitionDuration: const Duration(milliseconds: 350),
+      pageBuilder: (_, a, __) => FadeTransition(opacity: a, child: const PlayerScreen()),
+    ));
+  }
+
+  @override
+  ConsumerState<PlayerScreen> createState() => _PlayerScreenState();
+}
+
+class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBindingObserver {
+  bool _controls = true;
+  bool _playing = false;
+  bool _buffering = true;
+  double _position = 0;
+  double _duration = 0;
+  String _lang = 'sw';
+  String _quality = '360p';
+  List<String> _languages = const ['sw', 'en'];
+  List<String> _qualities = const ['360p', '480p', '720p', '1080p', 'Auto'];
+  String? _playerError;
+  int _reloadToken = 0;
+  bool _humanCheck = false;
+  bool _defaultsApplied = false;
+  DateTime _lastPosUi = DateTime.fromMillisecondsSinceEpoch(0);
+  final _streamController = WebStreamController();
+  Timer? _hideTimer;
+
+  static const _langLabels = <String, String>{
+    'sw': 'Kiswahili',
+    'en': 'English',
+  };
+
+  static const _defaultLanguages = <String>['sw', 'en'];
+  static const _defaultQualities = <String>['360p', '480p', '720p', '1080p', 'Auto'];
+
+  void _enterLandscapeMode() {
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _enterLandscapeMode();
+    _scheduleHide();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _enterLandscapeMode();
+    }
+  }
+
+  void _startBuffer() {
+    setState(() {
+      _buffering = true;
+      _playing = false;
+      _humanCheck = false;
+      _defaultsApplied = false;
+      _position = 0;
+      _duration = 0;
+      _lang = 'sw';
+      _quality = '360p';
+      _qualities = _defaultQualities;
+      _languages = _defaultLanguages;
+      _playerError = null;
+      _reloadToken++;
+    });
+  }
+
+  List<String> _mergeQualities(List<String> fromStream) {
+    final heights = <int>{};
+    for (final q in [..._defaultQualities, ...fromStream]) {
+      if (q == 'Auto') continue;
+      final n = int.tryParse(q.replaceAll(RegExp(r'[^0-9]'), ''));
+      if (n != null && n > 0) heights.add(n);
+    }
+    final sorted = heights.toList()..sort();
+    return [...sorted.map((h) => '${h}p'), 'Auto'];
+  }
+
+  Future<void> _applySmartDefaults() async {
+    if (_defaultsApplied) return;
+    _defaultsApplied = true;
+    await _streamController.setLanguage('sw');
+    await _streamController.setQuality('360p');
+  }
+
+  void _scheduleHide() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _controls = false);
+    });
+  }
+
+  void _toggleControls() {
+    setState(() => _controls = !_controls);
+    if (_controls) _scheduleHide();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _hideTimer?.cancel();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.white,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
+    ));
+    super.dispose();
+  }
+
+  String _fmt(double seconds) {
+    if (!seconds.isFinite || seconds < 0) return '0:00';
+    final s = seconds.floor();
+    final hours = s ~/ 3600;
+    final minutes = (s % 3600) ~/ 60;
+    final secs = (s % 60).toString().padLeft(2, '0');
+    return hours > 0
+        ? '$hours:${minutes.toString().padLeft(2, '0')}:$secs'
+        : '$minutes:$secs';
+  }
+
+  void _exit() => Navigator.of(context).maybePop();
+
+  Future<void> _openSwitcher() async {
+    await ChannelSwitcherSheet.show(context, onSwitched: () {
+      _startBuffer();
+    });
+    if (mounted) _enterLandscapeMode();
+  }
+
+  Future<void> _openLanguagePicker(PlaybackSource src) async {
+    _hideTimer?.cancel();
+    final picked = await LanguagePickerSheet.show(
+      context,
+      languages: _languages.isEmpty ? _defaultLanguages : _languages,
+      selected: _lang,
+    );
+    if (!mounted) return;
+    if (picked != null && picked != _lang) {
+      setState(() {
+        _lang = picked;
+        _buffering = true;
+      });
+      await _streamController.setLanguage(picked);
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      if (mounted) await _streamController.setLanguage(picked);
+      if (mounted) setState(() => _buffering = false);
+    }
+    _enterLandscapeMode();
+    _scheduleHide();
+  }
+
+  Future<void> _openQualityPicker() async {
+    _hideTimer?.cancel();
+    final picked = await QualityPickerSheet.show(
+      context,
+      qualities: _qualities.isEmpty ? _defaultQualities : _qualities,
+      selected: _quality,
+    );
+    if (!mounted) return;
+    if (picked != null && picked != _quality) {
+      setState(() {
+        _quality = picked;
+        _buffering = true;
+      });
+      await _streamController.setQuality(picked);
+      // Embed players sometimes need a second kick after Shaka attaches.
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      if (mounted) await _streamController.setQuality(picked);
+      if (mounted) {
+        setState(() => _buffering = false);
+        _scheduleHide();
+      }
+    }
+    _enterLandscapeMode();
+    _scheduleHide();
+  }
+
+  Widget _wrapLandscape(Widget child) {
+    // Do not use RotatedBox around the WebView — remounting/transforming a
+    // platform view causes blank video (audio-only) on Huawei. Landscape is
+    // already forced via SystemChrome.
+    return child;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final src = ref.watch(nowPlayingProvider);
+
+    if (src == null) {
+      // Defensive: nothing to play.
+      return const Scaffold(backgroundColor: PlayerColors.navyDeep);
+    }
+
+    return Scaffold(
+      backgroundColor: PlayerColors.navyDeep,
+      body: _wrapLandscape(
+        Stack(
+          fit: StackFit.expand,
+          children: [
+            // Real Shaka web-player surface using the clicked item's URL.
+            WebStreamPlayer(
+              key: ValueKey('${src.channelId ?? src.title}|${src.url}|$_reloadToken'),
+              source: src,
+              controller: _streamController,
+              onState: ({
+                bool? playing,
+                bool? buffering,
+                double? position,
+                double? duration,
+              }) {
+                if (!mounted) return;
+                final playChanged = playing != null && playing != _playing;
+                final bufChanged = buffering != null && buffering != _buffering;
+                final durChanged = duration != null && duration != _duration;
+                // While chrome is hidden, ignore scrubber ticks — they only
+                // cause Huawei jank (removeInvalidNode) and GC pressure.
+                if (!_controls && !playChanged && !bufChanged) return;
+                final now = DateTime.now();
+                final posDue = now.difference(_lastPosUi).inMilliseconds >= 800;
+                final posChanged = position != null && posDue && (position - _position).abs() >= 0.5;
+                if (!playChanged && !bufChanged && !durChanged && !posChanged) return;
+                if (posChanged) _lastPosUi = now;
+                setState(() {
+                  if (playing != null) _playing = playing;
+                  if (buffering != null) _buffering = buffering;
+                  if (position != null && (posChanged || playChanged)) _position = position;
+                  if (duration != null) _duration = duration;
+                });
+              },
+              onQualities: (items) {
+                if (!mounted) return;
+                final merged = _mergeQualities(items);
+                if (listEquals(merged, _qualities)) {
+                  _applySmartDefaults();
+                  return;
+                }
+                setState(() => _qualities = merged);
+                _applySmartDefaults();
+              },
+              onLanguages: (items) {
+                if (!mounted) return;
+                if (!listEquals(_languages, _defaultLanguages)) {
+                  setState(() => _languages = _defaultLanguages);
+                }
+                _applySmartDefaults();
+              },
+              onQualityChanged: (value) {
+                if (!mounted || value.isEmpty) return;
+                if (!_defaultsApplied && value == 'Auto') return;
+                if (value == _quality) return;
+                setState(() => _quality = value);
+              },
+              onLanguageChanged: (value) {
+                if (!mounted) return;
+                final code = value.toLowerCase().split('-').first;
+                if ((code == 'sw' || code == 'en') && code != _lang) {
+                  setState(() => _lang = code);
+                }
+              },
+              onHumanCheck: (needed) {
+                if (!mounted) return;
+                setState(() {
+                  _humanCheck = needed;
+                  if (needed) {
+                    _controls = false;
+                    _buffering = false;
+                    _playerError = null;
+                    _hideTimer?.cancel();
+                  }
+                });
+              },
+              onError: (message) {
+                if (!mounted) return;
+                setState(() {
+                  _humanCheck = false;
+                  _buffering = false;
+                  _playing = false;
+                  _playerError = message;
+                });
+              },
+            ),
+
+            // Hybrid WebViews eat Flutter parent GestureDetectors. When
+            // controls are hidden, this opaque layer catches taps so we can
+            // show the UI instead of pausing/playing the HTML video.
+            if (!_humanCheck && !_controls && _playerError == null)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    setState(() => _controls = true);
+                    _scheduleHide();
+                  },
+                ),
+              ),
+
+            if (_buffering && _playerError == null && !_humanCheck)
+              const IgnorePointer(
+                child: Center(
+                  child: SizedBox(
+                    width: 54,
+                    height: 54,
+                    child: CircularProgressIndicator(strokeWidth: 4, color: PlayerColors.green),
+                  ),
+                ),
+              ),
+
+            if (_playerError != null && !_humanCheck) _errorOverlay(),
+
+            // Minimal exit only — leave the full WebView free for the checkbox.
+            if (_humanCheck)
+              Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 8, 16, 0),
+                  child: _circleBtn(Icons.chevron_left_rounded, _exit),
+                ),
+              )
+            else if (_controls)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _toggleControls,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        const Color(0xFF06122A).withValues(alpha: 0.6),
+                        Colors.transparent,
+                        Colors.transparent,
+                        const Color(0xFF06122A).withValues(alpha: 0.78),
+                      ],
+                      stops: const [0, 0.28, 0.62, 1],
+                    ),
+                  ),
+                  child: Stack(
+                    children: [
+                      _topBar(src),
+                      _centerTransport(),
+                      _bottomBar(src),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _topBar(PlaybackSource src) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, MediaQuery.of(context).padding.top + 8, 20, 0),
+        child: Row(
+          children: [
+            _circleBtn(Icons.chevron_left_rounded, _exit),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(src.title,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: PlayerTheme.body(15, color: Colors.white, weight: FontWeight.w700)),
+                  Text(src.subtitle,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: PlayerTheme.body(11.5, color: Colors.white.withValues(alpha: 0.6))),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _centerTransport() {
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            onTap: () async {
+              if (_playing) {
+                await _streamController.pause();
+              } else {
+                await _streamController.play();
+              }
+              _scheduleHide();
+            },
+            child: Container(
+              width: 74, height: 74,
+              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), shape: BoxShape.circle),
+              child: Icon(_playing ? Icons.pause_rounded : Icons.play_arrow_rounded, color: Colors.white, size: 40),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bottomBar(PlaybackSource src) {
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(context).padding.bottom + 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (src.isChannel)
+              Row(children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                  decoration: BoxDecoration(color: PlayerColors.green, borderRadius: BorderRadius.circular(12)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const PulseDot(color: Colors.white, size: 7),
+                    const SizedBox(width: 6),
+                    Text('MOJA KWA MOJA', style: PlayerTheme.body(11, color: Colors.white, weight: FontWeight.w800)),
+                  ]),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Container(height: 6,
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(3))),
+                ),
+              ])
+            else
+              Row(children: [
+                Text(_fmt(_position),
+                    style: PlayerTheme.body(11.5, color: Colors.white, weight: FontWeight.w700)),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 6,
+                      activeTrackColor: PlayerColors.green,
+                      inactiveTrackColor: Colors.white.withValues(alpha: 0.22),
+                      thumbColor: Colors.white,
+                      overlayShape: SliderComponentShape.noOverlay,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                    ),
+                    child: Slider(
+                      value: _duration > 0 ? _position.clamp(0, _duration) : 0,
+                      max: _duration > 0 ? _duration : 1,
+                      onChanged: _duration > 0
+                          ? (value) {
+                              setState(() => _position = value);
+                              _streamController.seek(value);
+                            }
+                          : null,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Text(_fmt(_duration), style: PlayerTheme.body(11.5, color: Colors.white.withValues(alpha: 0.6), weight: FontWeight.w700)),
+              ]),
+            const SizedBox(height: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                _tool(
+                  Icons.translate_rounded,
+                  'Lugha · ${_langLabels[_lang] ?? 'Kiswahili'}',
+                  () => _openLanguagePicker(src),
+                ),
+                _tool(
+                  Icons.high_quality_rounded,
+                  'Ubora · $_quality',
+                  _openQualityPicker,
+                ),
+                _tool(
+                  Icons.live_tv_rounded,
+                  src.isChannel ? 'Badili Kituo' : 'Vituo',
+                  _openSwitcher,
+                  accent: true,
+                ),
+              ]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _tool(IconData icon, String label, VoidCallback onTap, {bool accent = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 9),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+          decoration: BoxDecoration(
+            color: accent ? PlayerColors.green : Colors.white.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, color: Colors.white, size: 16),
+            const SizedBox(width: 6),
+            Text(label, style: PlayerTheme.body(11.5, color: Colors.white, weight: FontWeight.w700)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _errorOverlay() {
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 430),
+        margin: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xE61A2740),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.white24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline_rounded, color: Colors.white, size: 42),
+            const SizedBox(height: 10),
+            Text(
+              'Video haikuweza kuchezwa',
+              style: PlayerTheme.body(16, color: Colors.white, weight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _playerError ?? '',
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: PlayerTheme.body(11.5, color: Colors.white70),
+            ),
+            const SizedBox(height: 14),
+            TextButton.icon(
+              onPressed: _startBuffer,
+              icon: const Icon(Icons.refresh_rounded, color: PlayerColors.green),
+              label: Text(
+                'Jaribu tena',
+                style: PlayerTheme.body(13, color: Colors.white, weight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _circleBtn(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 42, height: 42,
+        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(13)),
+        child: Icon(icon, color: Colors.white, size: 22),
+      ),
+    );
+  }
+}
+
+/// In-player live channel switcher (modern bottom sheet). Switches streams
+/// instantly; premium ("Malipo") channels route to the payment screen when
+/// the user is not subscribed.
+class ChannelSwitcherSheet extends ConsumerStatefulWidget {
+  final VoidCallback onSwitched;
+  const ChannelSwitcherSheet({super.key, required this.onSwitched});
+
+  static Future<void> show(BuildContext context, {required VoidCallback onSwitched}) {
+    return showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0xFF06122A).withValues(alpha: 0.55),
+      builder: (_) => ChannelSwitcherSheet(onSwitched: onSwitched),
+    );
+  }
+
+  @override
+  ConsumerState<ChannelSwitcherSheet> createState() => _ChannelSwitcherSheetState();
+}
+
+class _ChannelSwitcherSheetState extends ConsumerState<ChannelSwitcherSheet> {
+  String _cat = AppStrings.zote;
+  static const _cats = <(String, String, IconData)>[
+    (AppStrings.zote, 'Zote', Icons.grid_view_rounded),
+    (AppStrings.bure, 'Bure', Icons.live_tv_rounded),
+    (AppStrings.mpira, 'Mpira', Icons.sports_soccer_rounded),
+    (AppStrings.tamthilia, 'Tamthilia', Icons.theater_comedy_rounded),
+    (AppStrings.habari, 'Habari', Icons.newspaper_rounded),
+    (AppStrings.katuni, 'Katuni', Icons.animation_rounded),
+    (AppStrings.wanyama, 'Wanyama', Icons.pets_rounded),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final channels = ref.watch(filteredHomeChannelsProvider);
+    // Prefer full channel list for switcher.
+    final allAsync = ref.watch(channelsProvider);
+    final all = allAsync.maybeWhen(data: (c) => c, orElse: () => channels);
+    final src = ref.watch(nowPlayingProvider);
+    final user = ref.watch(userProvider);
+    ChannelModel? current;
+    if (src?.channelId != null) {
+      for (final c in all) {
+        if (c.id == src!.channelId) {
+          current = c;
+          break;
+        }
+      }
+    }
+    final list = all.where((c) => _cat == AppStrings.zote || c.category == _cat).toList();
+
+    return Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78),
+      padding: const EdgeInsets.only(top: 10, bottom: 16),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 42, height: 5, margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(color: const Color(0xFFD6E7F5), borderRadius: BorderRadius.circular(3))),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Badili Kituo', style: PlayerTheme.heading(19)),
+                  Text('${all.length} vituo vya moja kwa moja',
+                      style: PlayerTheme.body(11, color: PlayerColors.textHint, weight: FontWeight.w700)),
+                ]),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                decoration: BoxDecoration(color: PlayerColors.green.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(11)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const PulseDot(size: 7),
+                  const SizedBox(width: 6),
+                  Text('LIVE', style: PlayerTheme.body(11, color: PlayerColors.green, weight: FontWeight.w800)),
+                ]),
+              ),
+            ]),
+          ),
+
+          // Now playing preview.
+          if (current != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: PlayerColors.section, borderRadius: BorderRadius.circular(20)),
+                child: Row(children: [
+                  _preview(current),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('UNATAZAMA SASA', style: PlayerTheme.body(10, color: PlayerColors.green, weight: FontWeight.w800)),
+                      const SizedBox(height: 2),
+                      Text(current.name,
+                          maxLines: 1, overflow: TextOverflow.ellipsis,
+                          style: PlayerTheme.body(15, color: PlayerColors.textPrimary, weight: FontWeight.w800)),
+                      Row(children: [
+                        const Icon(Icons.tv_rounded, size: 14, color: PlayerColors.textHint),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(current.description.isNotEmpty ? current.description : current.category,
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: PlayerTheme.body(11.5, color: PlayerColors.textHint)),
+                        ),
+                      ]),
+                    ]),
+                  ),
+                ]),
+              ),
+            ),
+
+          // Category chips.
+          SizedBox(
+            height: 38,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _cats.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final cat = _cats[i];
+                final active = cat.$1 == _cat;
+                final color = active ? Colors.white : PlayerColors.textSecondary;
+                return GestureDetector(
+                  onTap: () => setState(() => _cat = cat.$1),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 13),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      gradient: active ? const LinearGradient(colors: [PlayerColors.navy, PlayerColors.navyMid]) : null,
+                      color: active ? null : PlayerColors.section,
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(cat.$3, size: 15, color: color),
+                        const SizedBox(width: 5),
+                        Text(
+                          cat.$2,
+                          style: PlayerTheme.body(12, color: color, weight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          Flexible(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              shrinkWrap: true,
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 9),
+              itemBuilder: (_, i) => _channelRow(context, list[i], src?.channelId, user.hasActiveSubscription),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _preview(ChannelModel c) {
+    return SizedBox(
+      width: 96,
+      height: 58,
+      child: Stack(
+        children: [
+          ChannelArt(
+            channel: c,
+            width: 96,
+            height: 58,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          const Positioned(top: 6, left: 6, child: GreenBadge('● LIVE')),
+          const Positioned(bottom: 6, right: 7, child: Equalizer(color: Colors.white, height: 13)),
+        ],
+      ),
+    );
+  }
+
+  Widget _channelRow(BuildContext context, ChannelModel c, String? nowId, bool subscribed) {
+    final current = nowId == c.id;
+    final locked = c.isPremium && !subscribed;
+    return GestureDetector(
+      onTap: () {
+        if (locked) {
+          Navigator.of(context).pop();
+          openPaymentScreen(context);
+          return;
+        }
+        if (ref.read(nowPlayingProvider.notifier).playChannel(c)) {
+          Navigator.of(context).pop();
+          widget.onSwitched();
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: current ? PlayerColors.green.withValues(alpha: 0.07) : PlayerColors.section,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: current ? PlayerColors.green.withValues(alpha: 0.35) : Colors.transparent, width: 1.5),
+        ),
+        child: Row(children: [
+          SizedBox(
+            width: 78,
+            height: 52,
+            child: ChannelArt(
+              channel: c,
+              width: 78,
+              height: 52,
+              borderRadius: BorderRadius.circular(13),
+            ),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                Flexible(
+                  child: Text(c.name,
+                      maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: PlayerTheme.body(14.5, color: PlayerColors.textPrimary, weight: FontWeight.w700)),
+                ),
+                if (c.isPremium) ...[const SizedBox(width: 7), const PremiumChannelBadge()],
+              ]),
+              const SizedBox(height: 2),
+              Text(c.description.isNotEmpty ? c.description : c.category, maxLines: 1, overflow: TextOverflow.ellipsis, style: PlayerTheme.body(11.5, color: PlayerColors.textHint)),
+            ]),
+          ),
+          const SizedBox(width: 8),
+          if (current)
+            const Equalizer(height: 16)
+          else if (locked)
+            Container(
+              width: 34, height: 34,
+              decoration: BoxDecoration(color: PlayerColors.navy, borderRadius: BorderRadius.circular(11)),
+              child: const Icon(Icons.lock_rounded, color: Colors.white, size: 16),
+            )
+          else
+            Container(
+              width: 34, height: 34,
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(11), boxShadow: PlayerColors.shadow(blur: 16, y: 8, opacity: 0.3)),
+              child: const Icon(Icons.play_arrow_rounded, color: PlayerColors.green, size: 20),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// Audio language picker — Kiswahili / English when tracks are available.
+class LanguagePickerSheet extends StatelessWidget {
+  final List<String> languages;
+  final String selected;
+  const LanguagePickerSheet({super.key, required this.languages, required this.selected});
+
+  static const _labels = <String, String>{
+    'sw': 'Kiswahili',
+    'en': 'English',
+  };
+
+  static Future<String?> show(
+    BuildContext context, {
+    required List<String> languages,
+    required String selected,
+  }) {
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0xFF06122A).withValues(alpha: 0.55),
+      builder: (_) => LanguagePickerSheet(languages: languages, selected: selected),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.72;
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + MediaQuery.paddingOf(context).bottom),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 5,
+                      margin: const EdgeInsets.only(bottom: 14),
+                      decoration: BoxDecoration(color: const Color(0xFFD6E7F5), borderRadius: BorderRadius.circular(3)),
+                    ),
+                  ),
+                  Text('Badili Lugha', style: PlayerTheme.heading(19)),
+                  const SizedBox(height: 4),
+                  Text('Kiswahili au English pekee', style: PlayerTheme.body(12, color: PlayerColors.textHint, weight: FontWeight.w600)),
+                  const SizedBox(height: 16),
+                  ...languages.map((code) {
+                    final active = code == selected;
+                    final label = _labels[code] ?? code.toUpperCase();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => Navigator.of(context).pop(code),
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            decoration: BoxDecoration(
+                              color: active ? PlayerColors.green.withValues(alpha: 0.10) : PlayerColors.section,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: active ? PlayerColors.green.withValues(alpha: 0.45) : Colors.transparent,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.translate_rounded,
+                                  color: active ? PlayerColors.green : PlayerColors.navy,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    label,
+                                    style: PlayerTheme.body(15, color: PlayerColors.textPrimary, weight: FontWeight.w700),
+                                  ),
+                                ),
+                                if (active)
+                                  const Icon(Icons.check_circle_rounded, color: PlayerColors.green, size: 22)
+                                else
+                                  Icon(Icons.circle_outlined, color: PlayerColors.textHint.withValues(alpha: 0.5), size: 22),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Stream quality picker — values come from the loaded manifest.
+class QualityPickerSheet extends StatelessWidget {
+  final List<String> qualities;
+  final String selected;
+  const QualityPickerSheet({super.key, required this.qualities, required this.selected});
+
+  static Future<String?> show(
+    BuildContext context, {
+    required List<String> qualities,
+    required String selected,
+  }) {
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0xFF06122A).withValues(alpha: 0.55),
+      builder: (_) => QualityPickerSheet(qualities: qualities, selected: selected),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.72;
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + MediaQuery.paddingOf(context).bottom),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 5,
+                      margin: const EdgeInsets.only(bottom: 14),
+                      decoration: BoxDecoration(color: const Color(0xFFD6E7F5), borderRadius: BorderRadius.circular(3)),
+                    ),
+                  ),
+                  Text('Badili Ubora', style: PlayerTheme.heading(19)),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Chaguo-msingi ni 360p — bora kwa mtandao wa kawaida',
+                    style: PlayerTheme.body(12, color: PlayerColors.textHint, weight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 16),
+                  ...qualities.map((q) {
+                    final active = q == selected;
+                    final isDefault = q == '360p';
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: () => Navigator.of(context).pop(q),
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            decoration: BoxDecoration(
+                              color: active ? PlayerColors.green.withValues(alpha: 0.10) : PlayerColors.section,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: active ? PlayerColors.green.withValues(alpha: 0.45) : Colors.transparent,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.high_quality_rounded,
+                                  color: active ? PlayerColors.green : PlayerColors.navy,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Text(
+                                        q,
+                                        style: PlayerTheme.body(15, color: PlayerColors.textPrimary, weight: FontWeight.w700),
+                                      ),
+                                      if (isDefault) ...[
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'chaguo-msingi',
+                                          style: PlayerTheme.body(11, color: PlayerColors.textHint, weight: FontWeight.w600),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                if (active)
+                                  const Icon(Icons.check_circle_rounded, color: PlayerColors.green, size: 22)
+                                else
+                                  Icon(Icons.circle_outlined, color: PlayerColors.textHint.withValues(alpha: 0.5), size: 22),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

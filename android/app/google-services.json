@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "904780930630",
+    "project_id": "supasoka-18128",
+    "storage_bucket": "supasoka-18128.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:904780930630:android:15c669bab1f4d1f93bf447",
+        "android_client_info": {
+          "package_name": "com.jamboplus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCJmMsez-AInf54lyXpVHkbvF9iKX2B-vg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

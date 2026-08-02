@@ -1,0 +1,23 @@
+{
+  "name": "jamboplus-api",
+  "version": "1.0.0",
+  "description": "JamboPlus / JamboAd API server",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/seed-only.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.10.0",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^11.1.0"
+  }
+}

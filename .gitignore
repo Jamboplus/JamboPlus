@@ -1,0 +1,69 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Railway deploy secrets
+/scripts/railway.env
+/scripts/railway.vars.raw
+/scripts/.railway-url
+server/secrets/
+server/.env
+server/node_modules/
+server/data/
+server/BUILD_STAMP.txt
+
+# Nested Flutter admin app build artifacts
+adplus/build/
+adplus/.dart_tool/
+adplus/.flutter-plugins-dependencies
+
+# Local packages / Linux stub build junk
+packages/**/build/
+**/.dart_tool/
+
+# Local SQLite / dart admin tool data
+jamboad_server/data/*.db
+jamboad_server/data/*.db-*
+

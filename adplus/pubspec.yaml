@@ -1,0 +1,44 @@
+name: adplus
+description: JamboAd — Admin panel for JamboPlus
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  dio: ^5.7.0
+  google_fonts: ^6.2.1
+  fl_chart: ^0.70.2
+  intl: ^0.20.2
+  shared_preferences: ^2.3.4
+  path_provider: ^2.1.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/icon/app_icon.png
+  adaptive_icon_background: "#080C14"
+  adaptive_icon_foreground: assets/icon/app_icon.png
+  web:
+    generate: true
+    background_color: "#080C14"
+    theme_color: "#FF8A00"
+  windows:
+    generate: true
+    icon_size: 256
+  macos:
+    generate: true
+
+flutter:
+  uses-material-design: true
