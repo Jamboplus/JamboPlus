@@ -271,12 +271,15 @@ class _ChannelListTileState extends State<ChannelListTile> {
             duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: AppColors.surfaceBorder.withValues(alpha: 0.45),
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primaryIndigo.withValues(
-                    alpha: _pressed ? 0.12 : 0.06,
+                  color: AppColors.primaryCyan.withValues(
+                    alpha: _pressed ? 0.16 : 0.08,
                   ),
                   blurRadius: _pressed ? 16 : 10,
                   offset: Offset(0, _pressed ? 6 : 3),
@@ -340,13 +343,13 @@ class _ChannelListTileState extends State<ChannelListTile> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppColors.primaryIndigo.withValues(alpha: 0.08),
+                    color: AppColors.primaryCyan.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
                     Icons.arrow_forward_ios_rounded,
                     size: 14,
-                    color: AppColors.primaryIndigo.withValues(alpha: 0.7),
+                    color: AppColors.primaryCyan.withValues(alpha: 0.85),
                   ),
                 ),
               ],

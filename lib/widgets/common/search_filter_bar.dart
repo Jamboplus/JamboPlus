@@ -27,11 +27,14 @@ class SearchFilterBar extends StatelessWidget {
             child: Container(
               height: 50,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: AppColors.surfaceBorder.withValues(alpha: 0.55),
+                ),
                 boxShadow: [
                   BoxShadow(
-                    color: AppColors.primaryIndigo.withValues(alpha: 0.08),
+                    color: AppColors.primaryCyan.withValues(alpha: 0.08),
                     blurRadius: 16,
                     offset: const Offset(0, 4),
                   ),
@@ -39,6 +42,7 @@ class SearchFilterBar extends StatelessWidget {
               ),
               child: TextField(
                 onChanged: onQueryChanged,
+                style: const TextStyle(color: AppColors.textPrimary),
                 decoration: InputDecoration(
                   hintText: AppStrings.tafutaChaneli,
                   hintStyle: TextStyle(
@@ -73,7 +77,7 @@ class SearchFilterBar extends StatelessWidget {
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 value: filter,
-                dropdownColor: Colors.white,
+                dropdownColor: AppColors.surfaceHigh,
                 icon: const Icon(Icons.filter_list_rounded, color: Colors.white),
                 style: const TextStyle(
                   color: Colors.white,

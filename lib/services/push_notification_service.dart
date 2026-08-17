@@ -5,10 +5,17 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
-/// Same channel id as Supasoka / SupaAdmin FCM Android config.
-const kPushChannelId = 'supasoka_high_importance';
+/// JamboPlus-only FCM topics (never Supasoka shared `all_users`).
+const kTopicAllUsers = 'jamboplus_all_users';
+const kTopicPremiumUsers = 'jamboplus_premium_users';
+const kTopicFreeUsers = 'jamboplus_free_users';
+
+/// Legacy Supasoka topics — unsubscribe on every init.
+const _legacyTopics = ['all_users', 'premium_users', 'free_users'];
+
+const kPushChannelId = 'jamboplus_notifications';
 const kPushChannelName = 'JamboPlus Notifications';
-const kPushChannelDescription = 'Habari na arifa kutoka SupaAdmin';
+const kPushChannelDescription = 'Habari na arifa kutoka JamboPlus';
 
 final _localNotifications = FlutterLocalNotificationsPlugin();
 
@@ -19,13 +26,46 @@ bool get _pushSupported =>
     (defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS);
 
+const _expiredReminderMarkers = [
+  'kifurushi chako kimeisha',
+  'kifurushi chako kimeisha muda wake',
+];
+
+/// True for Supasoka payment/expired reminders that must never surface in JamboPlus.
+bool isSupasokaReminderMessage(RemoteMessage message) {
+  final data = message.data;
+  final kind = (data['kind'] ?? data['type'] ?? '').toString().toLowerCase();
+  final scope = (data['scope'] ?? '').toString().toLowerCase();
+  final source = (data['source'] ?? '').toString().toLowerCase();
+  final target = (data['target'] ?? '').toString().toLowerCase();
+
+  if (scope == 'user') return true;
+  if (target.startsWith('user:')) return true;
+  if (source == 'supaadmin' && kind != 'broadcast') return true;
+  if (kind == 'reminder' ||
+      kind == 'payment_reminder' ||
+      kind == 'expired_reminder') {
+    return true;
+  }
+
+  final title = (message.notification?.title ?? data['title'] ?? '')
+      .toString()
+      .toLowerCase();
+  final body = (message.notification?.body ?? data['body'] ?? data['message'] ?? '')
+      .toString()
+      .toLowerCase();
+  final haystack = '$title $body';
+  return _expiredReminderMarkers.any(haystack.contains);
+}
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (!_pushSupported) return;
+  if (isSupasokaReminderMessage(message)) return;
   await Firebase.initializeApp();
 }
 
-/// Receives SupaAdmin pushes (mirrored onto JamboPlus FCM topics).
+/// Receives JamboPlus broadcasts on dedicated FCM topics only.
 class PushNotificationService {
   PushNotificationService._();
 
@@ -69,7 +109,6 @@ class PushNotificationService {
       sound: true,
     );
 
-    // Request permission (Android 13+ / iOS).
     final settings = await messaging.requestPermission(
       alert: true,
       badge: true,
@@ -80,7 +119,7 @@ class PushNotificationService {
       debugPrint('FCM token: ${await messaging.getToken()}');
     }
 
-    await messaging.subscribeToTopic('all_users');
+    await _leaveLegacySupasokaTopics();
     await syncAudienceTopics(isPremium: false);
 
     FirebaseMessaging.onMessage.listen(_showForegroundNotification);
@@ -90,21 +129,41 @@ class PushNotificationService {
     if (initial != null) _logOpened(initial);
   }
 
-  /// Keep premium/free topics in sync with JamboPlus subscription.
+  static Future<String?> currentToken() async {
+    if (!_firebaseReady) return null;
+    try {
+      return FirebaseMessaging.instance.getToken();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _leaveLegacySupasokaTopics() async {
+    if (!_firebaseReady) return;
+    final messaging = FirebaseMessaging.instance;
+    for (final topic in _legacyTopics) {
+      try {
+        await messaging.unsubscribeFromTopic(topic);
+      } catch (_) {}
+    }
+  }
+
+  /// Keep JamboPlus audience topics in sync with subscription.
   static Future<void> syncAudienceTopics({required bool isPremium}) async {
     if (!_firebaseReady) return;
     final messaging = FirebaseMessaging.instance;
     try {
-      await messaging.subscribeToTopic('all_users');
+      await _leaveLegacySupasokaTopics();
+      await messaging.subscribeToTopic(kTopicAllUsers);
       if (isPremium) {
-        await messaging.subscribeToTopic('premium_users');
-        await messaging.unsubscribeFromTopic('free_users');
+        await messaging.subscribeToTopic(kTopicPremiumUsers);
+        await messaging.unsubscribeFromTopic(kTopicFreeUsers);
       } else {
-        await messaging.subscribeToTopic('free_users');
-        await messaging.unsubscribeFromTopic('premium_users');
+        await messaging.subscribeToTopic(kTopicFreeUsers);
+        await messaging.unsubscribeFromTopic(kTopicPremiumUsers);
       }
       if (kDebugMode) {
-        debugPrint('FCM topics synced (premium=$isPremium)');
+        debugPrint('FCM topics synced (premium=$isPremium, jamboplus-only)');
       }
     } catch (e) {
       if (kDebugMode) debugPrint('FCM topic sync failed: $e');
@@ -112,6 +171,13 @@ class PushNotificationService {
   }
 
   static Future<void> _showForegroundNotification(RemoteMessage message) async {
+    if (isSupasokaReminderMessage(message)) {
+      if (kDebugMode) {
+        debugPrint('Ignoring Supasoka reminder (not for JamboPlus)');
+      }
+      return;
+    }
+
     final n = message.notification;
     if (n == null) return;
 

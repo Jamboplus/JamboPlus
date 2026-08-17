@@ -8,6 +8,7 @@ import 'package:jamboplus/screens/home/home_screen.dart';
 import 'package:jamboplus/screens/payment/payment_screen.dart';
 import 'package:jamboplus/screens/player/player_screen.dart';
 import 'package:jamboplus/screens/user/user_screen.dart';
+import 'package:jamboplus/core/theme/app_theme.dart';
 import 'package:jamboplus/widgets/navigation/animated_bottom_nav.dart';
 
 class MainShell extends ConsumerStatefulWidget {
@@ -29,22 +30,25 @@ class _MainShellState extends ConsumerState<MainShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Stack(
-        children: [
-          IndexedStack(
-            index: _currentIndex,
-            children: _screens,
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: AnimatedBottomNav(
-              currentIndex: _currentIndex,
-              onTap: (index) => setState(() => _currentIndex = index),
+      backgroundColor: Colors.transparent,
+      body: AppBackground(
+        child: Stack(
+          children: [
+            IndexedStack(
+              index: _currentIndex,
+              children: _screens,
             ),
-          ),
-        ],
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: AnimatedBottomNav(
+                currentIndex: _currentIndex,
+                onTap: (index) => setState(() => _currentIndex = index),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:jamboplus/core/theme/app_colors.dart';
 import 'package:jamboplus/screens/app_gate.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -11,8 +12,6 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  static const _bg = Color(0xFF00040C);
-
   @override
   void initState() {
     super.initState();
@@ -34,7 +33,10 @@ class _SplashScreenState extends State<SplashScreen> {
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: AppColors.background,
+        systemNavigationBarIconBrightness: Brightness.light,
       ),
     );
     Navigator.of(context).pushReplacement(
@@ -60,7 +62,7 @@ class _SplashScreenState extends State<SplashScreen> {
     final iconSize = (size * 0.42).clamp(148.0, 220.0);
 
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: AppColors.background,
       body: Center(
         child: Image.asset(
           'assets/icon/app_icon.png',

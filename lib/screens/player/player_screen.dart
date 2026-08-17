@@ -136,9 +136,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.white,
-      statusBarIconBrightness: Brightness.dark,
-      statusBarBrightness: Brightness.light,
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Color(0xFF00040C),
+      systemNavigationBarIconBrightness: Brightness.light,
     ));
     super.dispose();
   }
@@ -654,14 +656,14 @@ class _ChannelSwitcherSheetState extends ConsumerState<ChannelSwitcherSheet> {
       constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78),
       padding: const EdgeInsets.only(top: 10, bottom: 16),
       decoration: const BoxDecoration(
-        color: Colors.white,
+        color: PlayerColors.bg,
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(width: 42, height: 5, margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(color: const Color(0xFFD6E7F5), borderRadius: BorderRadius.circular(3))),
+              decoration: BoxDecoration(color: PlayerColors.navyMid.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(3))),
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 0, 22, 12),
             child: Row(children: [
@@ -848,7 +850,7 @@ class _ChannelSwitcherSheetState extends ConsumerState<ChannelSwitcherSheet> {
           else
             Container(
               width: 34, height: 34,
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(11), boxShadow: PlayerColors.shadow(blur: 16, y: 8, opacity: 0.3)),
+              decoration: BoxDecoration(color: PlayerColors.section, borderRadius: BorderRadius.circular(11), boxShadow: PlayerColors.shadow(blur: 16, y: 8, opacity: 0.3)),
               child: const Icon(Icons.play_arrow_rounded, color: PlayerColors.green, size: 20),
             ),
         ]),
@@ -894,7 +896,7 @@ class LanguagePickerSheet extends StatelessWidget {
             width: double.infinity,
             padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + MediaQuery.paddingOf(context).bottom),
             decoration: const BoxDecoration(
-              color: Colors.white,
+              color: PlayerColors.bg,
               borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
             ),
             child: SingleChildScrollView(
@@ -907,7 +909,7 @@ class LanguagePickerSheet extends StatelessWidget {
                       width: 42,
                       height: 5,
                       margin: const EdgeInsets.only(bottom: 14),
-                      decoration: BoxDecoration(color: const Color(0xFFD6E7F5), borderRadius: BorderRadius.circular(3)),
+                      decoration: BoxDecoration(color: PlayerColors.navyMid.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(3)),
                     ),
                   ),
                   Text('Badili Lugha', style: PlayerTheme.heading(19)),
@@ -1002,7 +1004,7 @@ class QualityPickerSheet extends StatelessWidget {
             width: double.infinity,
             padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + MediaQuery.paddingOf(context).bottom),
             decoration: const BoxDecoration(
-              color: Colors.white,
+              color: PlayerColors.bg,
               borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
             ),
             child: SingleChildScrollView(
@@ -1015,7 +1017,7 @@ class QualityPickerSheet extends StatelessWidget {
                       width: 42,
                       height: 5,
                       margin: const EdgeInsets.only(bottom: 14),
-                      decoration: BoxDecoration(color: const Color(0xFFD6E7F5), borderRadius: BorderRadius.circular(3)),
+                      decoration: BoxDecoration(color: PlayerColors.navyMid.withValues(alpha: 0.45), borderRadius: BorderRadius.circular(3)),
                     ),
                   ),
                   Text('Badili Ubora', style: PlayerTheme.heading(19)),

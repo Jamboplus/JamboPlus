@@ -8,7 +8,7 @@ class MaintenanceScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primaryIndigo,
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
           child: Padding(

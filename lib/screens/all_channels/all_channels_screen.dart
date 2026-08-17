@@ -85,7 +85,7 @@ class AllChannelsScreen extends ConsumerWidget {
                     ),
                     decoration: BoxDecoration(
                       gradient: isActive ? AppColors.primaryGradient : null,
-                      color: isActive ? null : Colors.white,
+                      color: isActive ? null : AppColors.surface,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
@@ -187,7 +187,7 @@ class _ViewToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(

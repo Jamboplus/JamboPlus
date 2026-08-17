@@ -2,6 +2,11 @@ const { cert, getApps, initializeApp } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
 const fs = require('fs');
 
+/** JamboPlus-only topics — never reuse Supasoka `all_users` (shared Firebase project). */
+const TOPIC_ALL = 'jamboplus_all_users';
+const TOPIC_PREMIUM = 'jamboplus_premium_users';
+const TOPIC_FREE = 'jamboplus_free_users';
+
 function loadServiceAccount() {
   const jsonEnv = (process.env.FCM_SERVICE_ACCOUNT_JSON || '').trim();
   if (jsonEnv) {
@@ -36,16 +41,16 @@ function ensureFirebase() {
 
 function topicForTarget(target) {
   const t = String(target || 'all').trim().toLowerCase();
-  if (t === 'premium') return 'premium_users';
-  if (t === 'free') return 'free_users';
-  return 'all_users';
+  if (t === 'premium') return TOPIC_PREMIUM;
+  if (t === 'free') return TOPIC_FREE;
+  return TOPIC_ALL;
 }
 
 const androidPushConfig = {
   priority: 'high',
   ttl: 28 * 24 * 60 * 60 * 1000,
   notification: {
-    channelId: 'supasoka_high_importance',
+    channelId: 'jamboplus_notifications',
     defaultSound: true,
     priority: 'high',
     visibility: 'public',
@@ -53,9 +58,10 @@ const androidPushConfig = {
 };
 
 /**
- * Fan-out a SupaAdmin-mirrored push to JamboPlus FCM topics.
+ * Fan-out a SupaAdmin-mirrored broadcast to JamboPlus FCM topics.
+ * Callers must only pass intentional broadcasts (never user reminders).
  */
-async function sendPushToTopic({ title, body, target = 'all' }) {
+async function sendPushToTopic({ title, body, target = 'all', kind = 'broadcast' }) {
   if (!ensureFirebase()) {
     throw new Error('FCM credentials missing on JamboPlus API');
   }
@@ -65,7 +71,9 @@ async function sendPushToTopic({ title, body, target = 'all' }) {
     notification: { title: String(title).trim(), body: String(body).trim() },
     data: {
       target: String(target || 'all'),
-      source: 'supaadmin',
+      source: 'jamboplus',
+      kind: String(kind || 'broadcast'),
+      scope: 'broadcast',
     },
     android: androidPushConfig,
   };
@@ -81,4 +89,11 @@ function fcmReady() {
   }
 }
 
-module.exports = { sendPushToTopic, fcmReady, topicForTarget };
+module.exports = {
+  sendPushToTopic,
+  fcmReady,
+  topicForTarget,
+  TOPIC_ALL,
+  TOPIC_PREMIUM,
+  TOPIC_FREE,
+};

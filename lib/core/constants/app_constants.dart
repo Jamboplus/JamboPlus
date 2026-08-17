@@ -2,7 +2,7 @@ import 'package:jamboplus/core/constants/api_config.dart';
 
 abstract final class AppConstants {
   static const appName = 'JamboPlus';
-  static const appVersion = '1.0.0';
+  static const appVersion = '1.0.2';
   static const whatsappNumber = '255712345678';
   static const whatsappMessage = 'Habari, ninahitaji msaada kutoka JamboPlus.';
 
@@ -21,5 +21,5 @@ abstract final class AppConstants {
 
   static const carouselAutoPlayInterval = Duration(seconds: 3);
   static const animationDuration = Duration(milliseconds: 300);
-  static const carouselHeight = 280.0;
+  static const carouselHeight = 430.0;
 }

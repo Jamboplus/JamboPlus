@@ -64,7 +64,12 @@ class UserNotifier extends StateNotifier<UserModel> {
     required String name,
     required String phone,
   }) async {
-    final remote = await _api.registerUser(name: name, phone: phone);
+    final deviceId = await _storage.getOrCreateDeviceId();
+    final remote = await _api.registerUser(
+      name: name,
+      phone: phone,
+      deviceId: deviceId,
+    );
     state = remote;
     await _storage.saveUser(remote);
     await PushNotificationService.syncAudienceTopics(

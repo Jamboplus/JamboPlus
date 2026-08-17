@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
+import 'package:jamboplus/core/theme/app_theme.dart';
 import 'package:jamboplus/providers/app_config_provider.dart';
 import 'package:jamboplus/providers/service_providers.dart';
 import 'package:jamboplus/providers/user_provider.dart';
@@ -286,26 +287,28 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.backgroundLight,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildStepIndicator(),
-            Expanded(
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  _buildNameStep(),
-                  _buildPackageStep(),
-                  _buildPhoneStep(),
-                  _buildConfirmStep(),
-                ],
+      backgroundColor: Colors.transparent,
+      body: AppBackground(
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(),
+              _buildStepIndicator(),
+              Expanded(
+                child: PageView(
+                  controller: _pageController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _buildNameStep(),
+                    _buildPackageStep(),
+                    _buildPhoneStep(),
+                    _buildConfirmStep(),
+                  ],
+                ),
               ),
-            ),
-            _buildBottomBar(),
-          ],
+              _buildBottomBar(),
+            ],
+          ),
         ),
       ),
     );
@@ -324,7 +327,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
                 : _prevStep,
             icon: const Icon(Icons.arrow_back_rounded),
             style: IconButton.styleFrom(
-              backgroundColor: Colors.white,
+              backgroundColor: AppColors.surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -648,9 +651,6 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
     return List.generate(_packages.length, (i) {
             final pkg = _packages[i];
             final isSelected = _selectedPackage == i;
-            final discount =
-                (((pkg.originalPrice - pkg.price) / pkg.originalPrice) * 100)
-                    .round();
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
               child: GestureDetector(
@@ -659,7 +659,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
                   duration: const Duration(milliseconds: 300),
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
                       color: isSelected
@@ -750,61 +750,25 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
                               ],
                             ),
                             const SizedBox(height: 3),
-                            Row(
-                              children: [
-                                Text(
-                                  pkg.duration,
-                                  style: TextStyle(
-                                    color: AppColors.textSecondary,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.liveRed.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    '-$discount%',
-                                    style: TextStyle(
-                                      color: AppColors.liveRed,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            Text(
+                              pkg.duration,
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 13,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(
-                            'TSh ${_formatPrice(pkg.price)}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 16,
-                              color: isSelected
-                                  ? pkg.color
-                                  : AppColors.textPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'TSh ${_formatPrice(pkg.originalPrice)}',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 12,
-                              decoration: TextDecoration.lineThrough,
-                              decorationColor: AppColors.textMuted,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        'TSh ${_formatPrice(pkg.price)}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                          color: isSelected
+                              ? pkg.color
+                              : AppColors.textPrimary,
+                        ),
                       ),
                       const SizedBox(width: 10),
                       AnimatedContainer(
@@ -1026,7 +990,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
                 color: AppColors.primaryIndigo.withValues(alpha: 0.08),
@@ -1136,10 +1100,10 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface.withValues(alpha: 0.92),
         border: Border(
           top: BorderSide(
-            color: AppColors.textMuted.withValues(alpha: 0.08),
+            color: AppColors.surfaceBorder.withValues(alpha: 0.45),
           ),
         ),
       ),
@@ -1268,7 +1232,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
       ),
       prefixIcon: Icon(prefixIcon, color: borderColor),
       filled: true,
-      fillColor: Colors.white,
+      fillColor: AppColors.surface,
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(
@@ -1366,7 +1330,7 @@ class _PaymentMethodChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: color.withValues(alpha: 0.2), width: 1.5),
         boxShadow: [

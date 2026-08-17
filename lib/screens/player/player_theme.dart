@@ -3,13 +3,13 @@ import 'package:google_fonts/google_fonts.dart';
 
 /// Player chrome palette (ported from Leotena for the full-screen player UI).
 abstract final class PlayerColors {
-  static const Color bg = Color(0xFFFFFFFF);
-  static const Color section = Color(0xFFF4FAFF);
-  static const Color textPrimary = Color(0xFF0F2748);
-  static const Color textSecondary = Color(0xFF3A5573);
-  static const Color textHint = Color(0xFF8FB4D6);
+  static const Color bg = Color(0xFF00040C);
+  static const Color section = Color(0xFF0B1A2E);
+  static const Color textPrimary = Color(0xFFF4FAFF);
+  static const Color textSecondary = Color(0xFF9BB8D4);
+  static const Color textHint = Color(0xFF6E8AAB);
   static const Color green = Color(0xFF19B26B);
-  static const Color navyDeep = Color(0xFF06122A);
+  static const Color navyDeep = Color(0xFF00040C);
   static const Color navy = Color(0xFF0F2748);
   static const Color navyMid = Color(0xFF1D4A82);
 

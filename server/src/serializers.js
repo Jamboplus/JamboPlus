@@ -93,13 +93,20 @@ function pricingToAppJson(row) {
 }
 
 function userToJson(row) {
+  const phone = String(row.phone || '').trim();
   return {
     id: row.id,
     name: row.name,
-    phone: row.phone,
+    phone,
     packageType: row.package_type,
     expiryDate: row.expiry_date,
     createdAt: row.created_at,
+    deviceId: row.device_id || null,
+    lastOpenAt: row.last_open_at || null,
+    fcmToken: row.fcm_token || null,
+    platform: row.platform || '',
+    appVersion: row.app_version || '',
+    isRegistered: phone.length >= 9,
   };
 }
 

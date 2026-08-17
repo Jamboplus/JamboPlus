@@ -20,14 +20,16 @@ class UsersScreen extends StatelessWidget {
     final q = state.userQuery.toLowerCase();
     final list = state.users.where((u) {
       if (q.isEmpty) return true;
-      return (u['name'] as String? ?? '').toLowerCase().contains(q) ||
-          (u['phone'] as String? ?? '').contains(q);
+      final name = (u['name'] as String? ?? '').toLowerCase();
+      final phone = u['phone'] as String? ?? '';
+      final deviceId = u['deviceId'] as String? ?? '';
+      return name.contains(q) || phone.contains(q) || deviceId.toLowerCase().contains(q);
     }).toList();
 
     return AdminPage(
       toolbar: [
         Expanded(
-          child: SearchField(hint: 'Tafuta jina, simu…', onChanged: state.setUserQuery),
+          child: SearchField(hint: 'Tafuta jina, simu, kifaa…', onChanged: state.setUserQuery),
         ),
         const SizedBox(width: 12),
         if (state.users.isNotEmpty)
@@ -104,7 +106,24 @@ Future<void> _wipeAllUsers(BuildContext context) async {
   }
 }
 
+bool _isRegistered(Map<String, dynamic> user) {
+  if (user['isRegistered'] == true) return true;
+  final phone = (user['phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
+  return phone.length >= 9;
+}
+
+String _userSubtitle(Map<String, dynamic> user) {
+  if (_isRegistered(user)) {
+    return user['phone'] as String? ?? '';
+  }
+  final deviceId = user['deviceId'] as String? ?? '';
+  if (deviceId.isEmpty) return 'App pekee';
+  final short = deviceId.length > 8 ? deviceId.substring(deviceId.length - 8) : deviceId;
+  return 'App pekee · …$short';
+}
+
 bool _hasPremium(Map<String, dynamic> user) {
+  if (!_isRegistered(user)) return false;
   if (user['packageType'] != 'premium') return false;
   final expiry = user['expiryDate'] as String?;
   if (expiry == null) return true;
@@ -227,8 +246,10 @@ class _UserRow extends StatelessWidget {
         ),
       ),
       title: user['name'] as String? ?? '—',
-      subtitle: user['phone'] as String? ?? '',
+      subtitle: _userSubtitle(user),
       badges: [
+        if (!_isRegistered(user))
+          const StatusBadge('App pekee', color: AdminColors.info),
         StatusBadge(
           premium ? _remainingLabel(user) : 'Bure',
           color: premium ? AdminColors.green : AdminColors.info,

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/constants/app_constants.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
+import 'package:jamboplus/core/theme/app_theme.dart';
 import 'package:jamboplus/providers/app_config_provider.dart';
 import 'package:jamboplus/screens/main_shell.dart';
 import 'package:jamboplus/screens/maintenance/maintenance_screen.dart';
@@ -44,28 +45,34 @@ class AppGate extends ConsumerWidget {
 
     return remote.when(
       loading: () => const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        backgroundColor: Colors.transparent,
+        body: AppBackground(
+          child: Center(child: CircularProgressIndicator()),
+        ),
       ),
       error: (e, _) => Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textSecondary),
-                const SizedBox(height: 16),
-                Text(
-                  _gateErrorMessage(e),
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 20),
-                FilledButton(
-                  onPressed: () => invalidateRemoteContent(ref),
-                  child: const Text('Jaribu tena'),
-                ),
-              ],
+        backgroundColor: Colors.transparent,
+        body: AppBackground(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.textSecondary),
+                  const SizedBox(height: 16),
+                  Text(
+                    _gateErrorMessage(e),
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: () => invalidateRemoteContent(ref),
+                    child: const Text('Jaribu tena'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

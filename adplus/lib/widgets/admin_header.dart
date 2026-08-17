@@ -17,8 +17,9 @@ class AdminHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Keep flush under the status bar (shell already applies SafeArea).
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

@@ -21,7 +21,7 @@ function migrate(db) {
       expiry_date TEXT,
       created_at TEXT NOT NULL
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS users_phone_unique ON users(phone);
+    CREATE UNIQUE INDEX IF NOT EXISTS users_phone_unique ON users(phone) WHERE phone != '';
     CREATE TABLE IF NOT EXISTS channels (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -98,6 +98,31 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS payment_transactions_phone_idx ON payment_transactions(phone);
     CREATE INDEX IF NOT EXISTS payment_transactions_status_idx ON payment_transactions(status);
   `);
+  migrateUserDeviceColumns(db);
+}
+
+function migrateUserDeviceColumns(db) {
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('device_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN device_id TEXT');
+  }
+  if (!cols.includes('last_open_at')) {
+    db.exec('ALTER TABLE users ADD COLUMN last_open_at TEXT');
+  }
+  if (!cols.includes('fcm_token')) {
+    db.exec('ALTER TABLE users ADD COLUMN fcm_token TEXT');
+  }
+  if (!cols.includes('platform')) {
+    db.exec("ALTER TABLE users ADD COLUMN platform TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes('app_version')) {
+    db.exec("ALTER TABLE users ADD COLUMN app_version TEXT NOT NULL DEFAULT ''");
+  }
+  db.exec('DROP INDEX IF EXISTS users_phone_unique');
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS users_phone_unique ON users(phone) WHERE phone != ''");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS users_device_id_unique ON users(device_id) WHERE device_id IS NOT NULL AND device_id != ''",
+  );
 }
 
 function seedIfEmpty(db) {

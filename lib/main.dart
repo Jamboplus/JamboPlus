@@ -13,7 +13,10 @@ Future<void> main() async {
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: Color(0xFF00040C),
+      systemNavigationBarIconBrightness: Brightness.light,
     ),
   );
   // FCM after first frame so splash is not blocked; safe on desktop (no-op).
@@ -30,7 +33,8 @@ class JamboPlusApp extends StatelessWidget {
     return MaterialApp(
       title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
+      theme: AppTheme.dark,
+      themeMode: ThemeMode.dark,
       home: const SplashScreen(),
     );
   }

@@ -1,7 +1,7 @@
 name: jamboplus
 description: JamboPlus - Premium IPTV streaming app kwa Kiswahili
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.2+3
 
 environment:
   sdk: ^3.12.0

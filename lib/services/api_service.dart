@@ -95,10 +95,34 @@ class ApiService {
   Future<UserModel> registerUser({
     required String name,
     required String phone,
+    String? deviceId,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/v1/app/users/register',
-      data: {'name': name.trim(), 'phone': phone.trim()},
+      data: {
+        'name': name.trim(),
+        'phone': phone.trim(),
+        if (deviceId != null && deviceId.isNotEmpty) 'deviceId': deviceId,
+      },
+    );
+    return UserModel.fromJson(response.data!);
+  }
+
+  /// Record app install/open so admin can see every device.
+  Future<UserModel> sendDeviceHeartbeat({
+    required String deviceId,
+    String? fcmToken,
+    String? platform,
+    String? appVersion,
+  }) async {
+    final response = await _dio.post<Map<String, dynamic>>(
+      '/v1/app/devices/heartbeat',
+      data: {
+        'deviceId': deviceId,
+        if (fcmToken != null && fcmToken.isNotEmpty) 'fcmToken': fcmToken,
+        if (platform != null && platform.isNotEmpty) 'platform': platform,
+        if (appVersion != null && appVersion.isNotEmpty) 'appVersion': appVersion,
+      },
     );
     return UserModel.fromJson(response.data!);
   }

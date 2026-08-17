@@ -29,11 +29,14 @@ class AnimatedBottomNav extends StatelessWidget {
       child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface.withValues(alpha: 0.92),
               borderRadius: BorderRadius.circular(32),
+              border: Border.all(
+                color: AppColors.surfaceBorder.withValues(alpha: 0.65),
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primaryIndigo.withValues(alpha: 0.12),
+                  color: AppColors.primaryCyan.withValues(alpha: 0.16),
                   blurRadius: 30,
                   offset: const Offset(0, 10),
                 ),

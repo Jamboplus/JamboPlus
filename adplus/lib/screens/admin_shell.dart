@@ -52,35 +52,40 @@ class AdminShell extends StatelessWidget {
                 },
               ),
             ),
-      body: Row(
-        children: [
-          if (wide)
-            AdminSidebar(
-              activeId: state.section,
-              adminEmail: state.adminEmail,
-              onSelect: state.setSection,
-              onLogout: state.logout,
-            ),
-          Expanded(
-            child: Builder(
-              builder: (innerContext) => Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  AdminHeader(
-                    title: meta?.label ?? 'Dashibodi',
-                    onMenu: wide ? null : () => Scaffold.of(innerContext).openDrawer(),
-                  ),
-                  Expanded(
-                    child: KeyedSubtree(
-                      key: ValueKey(state.section),
-                      child: _screen(state.section),
+      body: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            if (wide)
+              AdminSidebar(
+                activeId: state.section,
+                adminEmail: state.adminEmail,
+                onSelect: state.setSection,
+                onLogout: state.logout,
+              ),
+            Expanded(
+              child: Builder(
+                builder: (innerContext) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    AdminHeader(
+                      title: meta?.label ?? 'Dashibodi',
+                      onMenu: wide
+                          ? null
+                          : () => Scaffold.of(innerContext).openDrawer(),
                     ),
-                  ),
-                ],
+                    Expanded(
+                      child: KeyedSubtree(
+                        key: ValueKey(state.section),
+                        child: _screen(state.section),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
