@@ -35,17 +35,18 @@ final remoteContentProvider = FutureProvider<void>((ref) async {
   final deviceId = await storage.getOrCreateDeviceId();
   final fcmToken = await PushNotificationService.currentToken();
   try {
-    await api.sendDeviceHeartbeat(
+    final heartbeatUser = await api.sendDeviceHeartbeat(
       deviceId: deviceId,
       fcmToken: fcmToken,
       platform: defaultTargetPlatform.name,
       appVersion: AppConstants.appVersion,
     );
+    await ref.read(userProvider.notifier).seedFromDevice(heartbeatUser);
   } catch (_) {
     // Offline — admin list updates on next open.
+    await ref.read(userProvider.notifier).syncFromServer();
   }
 
-  await ref.read(userProvider.notifier).syncFromServer();
   final user = ref.read(userProvider);
   // ignore: unawaited_futures
   PushNotificationService.syncAudienceTopics(

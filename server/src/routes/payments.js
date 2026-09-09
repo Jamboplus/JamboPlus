@@ -20,20 +20,55 @@ function addDaysIso(fromDate, days) {
   return d.toISOString();
 }
 
-function ensureUser(db, { name, phone }) {
-  const existing = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
-  if (existing) {
-    if (name && name !== existing.name) {
-      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, existing.id);
-      return db.prepare('SELECT * FROM users WHERE id = ?').get(existing.id);
-    }
-    return existing;
+function ensureUser(db, { name, phone, deviceId }) {
+  const device = String(deviceId || '').trim();
+  const byPhone = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+  const byDevice = device.length >= 8
+    ? db.prepare('SELECT * FROM users WHERE device_id = ?').get(device)
+    : null;
+
+  // Merge guest device row into the phone account (same as /users/register).
+  if (byPhone && byDevice && byPhone.id !== byDevice.id) {
+    db.prepare('DELETE FROM users WHERE id = ?').run(byDevice.id);
+    db.prepare(
+      'UPDATE users SET name = COALESCE(?, name), device_id = ? WHERE id = ?',
+    ).run(name || null, device, byPhone.id);
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(byPhone.id);
   }
+
+  if (byDevice && !byPhone) {
+    db.prepare(
+      'UPDATE users SET name = COALESCE(?, name), phone = ? WHERE id = ?',
+    ).run(name || null, phone, byDevice.id);
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(byDevice.id);
+  }
+
+  if (byPhone) {
+    if (name && name !== byPhone.name) {
+      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, byPhone.id);
+    }
+    if (device.length >= 8 && !byPhone.device_id) {
+      db.prepare('UPDATE users SET device_id = ? WHERE id = ?').run(device, byPhone.id);
+    }
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(byPhone.id);
+  }
+
   const id = uuidv4();
   const createdAt = new Date().toISOString();
   db.prepare(
-    'INSERT INTO users (id, name, phone, package_type, expiry_date, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(id, name || 'Mtumiaji', phone, 'free', null, createdAt);
+    `INSERT INTO users (
+      id, name, phone, package_type, expiry_date, created_at, device_id, last_open_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    name || 'Mtumiaji',
+    phone,
+    'free',
+    null,
+    createdAt,
+    device.length >= 8 ? device : null,
+    createdAt,
+  );
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
@@ -45,7 +80,17 @@ function grantPremiumFromPayment(db, tx) {
     throw err;
   }
 
-  const user = ensureUser(db, { name: tx.user_name, phone: tx.phone });
+  let deviceId = null;
+  if (tx.user_id) {
+    const linked = db.prepare('SELECT * FROM users WHERE id = ?').get(tx.user_id);
+    if (linked && linked.device_id) deviceId = linked.device_id;
+  }
+
+  const user = ensureUser(db, {
+    name: tx.user_name,
+    phone: tx.phone,
+    deviceId,
+  });
   const now = new Date();
   let base = now;
   if (user.package_type === 'premium' && user.expiry_date) {
@@ -58,9 +103,9 @@ function grantPremiumFromPayment(db, tx) {
 
   const updated = db.prepare(
     `UPDATE payment_transactions
-        SET status = 'completed', completed_at = ?, activated_at = ?
+        SET status = 'completed', completed_at = ?, activated_at = ?, user_id = ?
       WHERE id = ? AND status != 'completed'`,
-  ).run(now.toISOString(), now.toISOString(), tx.id);
+  ).run(now.toISOString(), now.toISOString(), user.id, tx.id);
 
   if (updated.changes === 0) {
     return db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
@@ -183,6 +228,7 @@ function createPaymentRoutes(db) {
       const name = String(req.body.name || '').trim() || 'Mtumiaji';
       const planId = String(req.body.planId || req.body.plan_id || '').trim();
       const phoneRaw = String(req.body.phone || '').trim();
+      const deviceId = String(req.body.deviceId || req.body.device_id || '').trim();
       const localPhone = toLocalTzPhone(phoneRaw);
       const buyerPhone = normalizeTzPhone(phoneRaw);
 
@@ -209,9 +255,9 @@ function createPaymentRoutes(db) {
         });
       }
 
-      // Store local 0… form (same as Flutter register /users/me).
+      // Store local 0… form (same as Flutter register /users/me) and bind device.
       const phoneDigits = localPhone;
-      const user = ensureUser(db, { name, phone: phoneDigits });
+      const user = ensureUser(db, { name, phone: phoneDigits, deviceId });
 
       const emailBase = phoneDigits.replace(/\D/g, '').slice(-9) || 'user';
       const order = await sonicpesaCreateOrder({

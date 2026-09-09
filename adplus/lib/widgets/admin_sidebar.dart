@@ -33,7 +33,7 @@ class AdminSidebar extends StatelessWidget {
         child: Column(
           children: [
             Padding(
-              padding: EdgeInsets.fromLTRB(compact ? 12 : 22, 12, compact ? 12 : 22, 24),
+              padding: EdgeInsets.fromLTRB(compact ? 12 : 22, compact ? 8 : 12, compact ? 12 : 22, 20),
               child: Row(
                 children: [
                   Container(

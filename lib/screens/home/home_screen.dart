@@ -147,19 +147,25 @@ class HomeScreen extends ConsumerWidget {
           onTap: () => openPaymentScreen(context),
         ),
         SectionHeader(title: AppStrings.mpira),
-        SizedBox(
-          height: 150,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.only(left: 16, right: 4),
-            itemCount: mpira.length,
-            itemBuilder: (context, index) => ChannelHorizontalCard(
-              channel: mpira[index],
-              width: 220,
-              height: 150,
-              onTap: () => openChannel(context, ref, mpira[index]),
-            ),
-          ),
+        Builder(
+          builder: (context) {
+            final height = burePairCardHeight(context);
+            final width = burePairCardWidth(context);
+            return SizedBox(
+              height: height,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.only(left: 16, right: 4),
+                itemCount: mpira.length,
+                itemBuilder: (context, index) => ChannelHorizontalCard(
+                  channel: mpira[index],
+                  width: width,
+                  height: height,
+                  onTap: () => openChannel(context, ref, mpira[index]),
+                ),
+              ),
+            );
+          },
         ),
         SectionHeader(title: AppStrings.tamthilia),
         Padding(

@@ -155,6 +155,18 @@ class AdminApi {
     });
   }
 
+  /// Grant or revoke premium by userId, phone, or unique deviceId.
+  Future<Map<String, dynamic>> setUserPremium(Map<String, dynamic> body) async {
+    return _wrap(() async {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/v1/admin/users/premium',
+        data: body,
+        options: _auth,
+      );
+      return res.data!;
+    });
+  }
+
   Future<void> deleteUser(String id) async {
     return _wrap(() async {
       await _dio.delete('/v1/admin/users/$id', options: _auth);

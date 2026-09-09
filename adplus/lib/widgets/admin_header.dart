@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/admin_theme.dart';
 
-class AdminHeader extends StatelessWidget {
+class AdminHeader extends StatelessWidget implements PreferredSizeWidget {
   const AdminHeader({
     super.key,
     required this.title,
@@ -15,37 +16,78 @@ class AdminHeader extends StatelessWidget {
   final VoidCallback? onMenu;
   final Widget? trailing;
 
+  static const _minTopInset = 8.0;
+
+  @override
+  Size get preferredSize {
+    final base = subtitle == null ? 64.0 : 78.0;
+    return Size.fromHeight(base + _minTopInset);
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Keep flush under the status bar (shell already applies SafeArea).
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (onMenu != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 12, top: 2),
-              child: IconButton(
+    final topInset = MediaQuery.viewPaddingOf(context).top;
+    final top = topInset > 0 ? topInset : _minTopInset;
+
+    return Material(
+      color: AdminColors.bg,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(8, top + 4, 16, 12),
+        decoration: BoxDecoration(
+          color: AdminColors.bg,
+          border: Border(
+            bottom: BorderSide(color: AdminColors.border.withValues(alpha: 0.28)),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (onMenu != null)
+              IconButton(
                 onPressed: onMenu,
+                tooltip: 'Menyu',
                 icon: const Icon(Icons.menu_rounded, color: AdminColors.textPrimary),
               ),
-            ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: AdminTheme.heading(26)),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 4),
-                  Text(subtitle!, style: AdminTheme.body(13, color: AdminColors.textHint)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AdminTheme.heading(22),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AdminTheme.body(12, color: AdminColors.textHint),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          if (trailing != null) trailing!,
-        ],
+            if (trailing != null) trailing!,
+          ],
+        ),
       ),
     );
   }
+}
+
+/// Keeps admin status bar icons readable on the dark shell.
+void applyAdminSystemChrome() {
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+      statusBarBrightness: Brightness.dark,
+      systemNavigationBarColor: AdminColors.bg,
+      systemNavigationBarIconBrightness: Brightness.light,
+    ),
+  );
 }

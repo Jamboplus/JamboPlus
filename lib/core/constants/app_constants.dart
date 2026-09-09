@@ -2,7 +2,7 @@ import 'package:jamboplus/core/constants/api_config.dart';
 
 abstract final class AppConstants {
   static const appName = 'JamboPlus';
-  static const appVersion = '1.0.2';
+  static const appVersion = '1.0.4';
   static const whatsappNumber = '255712345678';
   static const whatsappMessage = 'Habari, ninahitaji msaada kutoka JamboPlus.';
 

@@ -69,7 +69,20 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _playVoice(0));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final user = ref.read(userProvider);
+      if (user.name.isNotEmpty &&
+          user.name != 'Free User' &&
+          user.name != 'Mgeni' &&
+          _nameController.text.isEmpty) {
+        _nameController.text = user.name;
+      }
+      if (user.phone.isNotEmpty && _phoneController.text.isEmpty) {
+        _phoneController.text = user.phone;
+      }
+      setState(() {});
+      _playVoice(0);
+    });
   }
 
   @override
@@ -140,11 +153,26 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
 
     try {
       final api = ref.read(apiServiceProvider);
+      final storage = ref.read(storageServiceProvider);
+      final deviceId = await storage.getOrCreateDeviceId();
+
+      // Bind this device to the paying phone before SonicPesa so unlock
+      // and Mtumiaji profile work even if status polling is delayed.
+      try {
+        await ref.read(userProvider.notifier).submitAccessRequest(
+              name: name,
+              phone: phone,
+            );
+      } catch (_) {
+        // Payment can still proceed; activateAfterPayment retries merge.
+      }
+
       final started = await api.startPayment(
         name: name,
         phone: phone,
         planId: pkg.id,
         amount: pkg.price,
+        deviceId: deviceId,
       );
       final orderId = (started['orderId'] ?? started['order_id'] ?? '')
           .toString()
@@ -194,20 +222,27 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
 
         if (completed) {
           _pollTimer?.cancel();
-          await ref.read(userProvider.notifier).syncFromServer();
-          // Prefer user payload from status if present.
           final userJson = status['user'];
-          if (userJson is Map<String, dynamic>) {
-            // syncFromServer already refreshed; ignore payload shape mismatches.
-          }
+          await ref.read(userProvider.notifier).activateAfterPayment(
+                name: _nameController.text.trim(),
+                phone: _phoneController.text.trim(),
+                userJson: userJson is Map
+                    ? Map<String, dynamic>.from(userJson)
+                    : null,
+              );
           if (!mounted) return;
           setState(() => _isProcessing = false);
           await _playVoice('success');
           if (mounted) {
+            final user = ref.read(userProvider);
+            final remaining = user.hasActiveSubscription
+                ? user.remainingLabel
+                : null;
             _showResultDialog(
               true,
-              message:
-                  'Malipo yamefanikiwa! Akaunti yako ya Premium imefunguliwa.',
+              message: remaining != null && remaining != 'Haijawekwa'
+                  ? 'Malipo yamefanikiwa! Premium imeanzishwa ($remaining). Chaneli zimefunguliwa.'
+                  : 'Malipo yamefanikiwa! Akaunti yako ya Premium imefunguliwa.',
             );
           }
           if (!completer.isCompleted) completer.complete();

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/constants/app_strings.dart';
@@ -16,78 +17,105 @@ class UserScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(userProvider);
+    final active = user.hasActiveSubscription;
 
     return SafeArea(
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.only(
-          bottom: AnimatedBottomNav.contentBottomInset,
-        ),
-        child: Column(
-          children: [
-            const SizedBox(height: 24),
-            _ProfileHeader(user: user),
-            const SizedBox(height: 20),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GlassCard(
-                padding: const EdgeInsets.all(20),
+      child: RefreshIndicator(
+        onRefresh: () => ref.read(userProvider.notifier).refresh(),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          padding: const EdgeInsets.only(
+            bottom: AnimatedBottomNav.contentBottomInset,
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 24),
+              _ProfileHeader(user: user),
+              const SizedBox(height: 20),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GlassCard(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppStrings.taarifaZaMtumiaji,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 16),
+                      _InfoRow(
+                        label: AppStrings.jina,
+                        value: user.name,
+                      ),
+                      _InfoRow(
+                        label: AppStrings.simu,
+                        value: user.phone.isEmpty
+                            ? AppStrings.nambaHaijawekwa
+                            : user.phone,
+                      ),
+                      _InfoRow(
+                        label: AppStrings.haliYaAkaunti,
+                        value: user.packageLabel,
+                      ),
+                      _InfoRow(
+                        label: AppStrings.mudaWaUsajili,
+                        value: user.expiryLabel,
+                      ),
+                      _InfoRow(
+                        label: AppStrings.kitambulishoChaKifaa,
+                        value: user.deviceIdLabel,
+                        isLast: true,
+                        monospaced: true,
+                        onCopy: user.deviceId.isEmpty
+                            ? null
+                            : () async {
+                                await Clipboard.setData(
+                                  ClipboardData(text: user.deviceId),
+                                );
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Kitambulisho kimenakiliwa'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                      ),
+                    ],
+                  ),
+                ),
+              ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.05, end: 0),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      AppStrings.taarifaZaMtumiaji,
+                      AppStrings.usajili,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
-                    const SizedBox(height: 16),
-                    _InfoRow(
-                      label: AppStrings.jina,
-                      value: user.name,
-                    ),
-                    _InfoRow(
-                      label: AppStrings.simu,
-                      value: user.phone.isEmpty
-                          ? AppStrings.nambaHaijawekwa
-                          : user.phone,
-                    ),
-                    _InfoRow(
-                      label: AppStrings.haliYaAkaunti,
-                      value: user.packageLabel,
-                    ),
-                    _InfoRow(
-                      label: AppStrings.mudaWaUsajili,
-                      value: user.expiryLabel,
-                      isLast: true,
-                    ),
+                    const SizedBox(height: 12),
+                    if (active)
+                      _PremiumMemberCard(user: user)
+                    else
+                      PremiumUpgradeCard(
+                        compact: true,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PaymentScreen(),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
-              ),
-            ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.05, end: 0),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    AppStrings.usajili,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  if (user.isPremium)
-                    _PremiumMemberCard()
-                  else
-                    PremiumUpgradeCard(
-                      compact: true,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const PaymentScreen()),
-                      ),
-                    ),
-                ],
-              ),
-            ).animate().fadeIn(delay: 500.ms),
-            const SizedBox(height: 24),
-          ],
+              ).animate().fadeIn(delay: 500.ms),
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
@@ -101,6 +129,7 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final active = user.hasActiveSubscription;
     return Column(
       children: [
         Container(
@@ -142,17 +171,25 @@ class _ProfileHeader extends StatelessWidget {
         Text(
           user.packageLabel,
           style: TextStyle(
-            color: user.isPremium
-                ? AppColors.primaryGreen
-                : AppColors.textMuted,
+            color: active ? AppColors.primaryGreen : AppColors.textMuted,
             fontWeight: FontWeight.w600,
           ),
         ),
+        if (active && user.expiryDate != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Inaisha: ${user.expiryLabel}',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
+        ],
         const SizedBox(height: 10),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           decoration: BoxDecoration(
-            gradient: user.isPremium
+            gradient: active
                 ? LinearGradient(
                     colors: [
                       AppColors.primaryGreen,
@@ -160,13 +197,13 @@ class _ProfileHeader extends StatelessWidget {
                     ],
                   )
                 : null,
-            color: user.isPremium ? null : AppColors.textMuted.withValues(alpha: 0.15),
+            color: active ? null : AppColors.textMuted.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
-            user.isPremium ? 'PREMIUM' : 'FREE',
+            active ? 'PREMIUM' : 'FREE',
             style: TextStyle(
-              color: user.isPremium ? Colors.white : AppColors.textSecondary,
+              color: active ? Colors.white : AppColors.textSecondary,
               fontWeight: FontWeight.w800,
               fontSize: 12,
               letterSpacing: 1,
@@ -183,11 +220,15 @@ class _InfoRow extends StatelessWidget {
     required this.label,
     required this.value,
     this.isLast = false,
+    this.monospaced = false,
+    this.onCopy,
   });
 
   final String label;
   final String value;
   final bool isLast;
+  final bool monospaced;
+  final VoidCallback? onCopy;
 
   @override
   Widget build(BuildContext context) {
@@ -203,10 +244,28 @@ class _InfoRow extends StatelessWidget {
                   style: TextStyle(color: AppColors.textSecondary),
                 ),
               ),
-              Text(
-                value,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+              Flexible(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontFamily: monospaced ? 'monospace' : null,
+                    fontSize: monospaced ? 12 : null,
+                  ),
+                ),
               ),
+              if (onCopy != null) ...[
+                const SizedBox(width: 6),
+                IconButton(
+                  onPressed: onCopy,
+                  icon: const Icon(Icons.copy_rounded, size: 16),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  tooltip: 'Nakili',
+                ),
+              ],
             ],
           ),
         ),
@@ -217,6 +276,10 @@ class _InfoRow extends StatelessWidget {
 }
 
 class _PremiumMemberCard extends StatelessWidget {
+  const _PremiumMemberCard({required this.user});
+
+  final UserModel user;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -238,15 +301,15 @@ class _PremiumMemberCard extends StatelessWidget {
           ),
         ],
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.verified_rounded, color: Colors.white, size: 36),
-          SizedBox(width: 14),
+          const Icon(Icons.verified_rounded, color: Colors.white, size: 36),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
+                const Text(
                   AppStrings.mwanachamaPremium,
                   style: TextStyle(
                     color: Colors.white,
@@ -254,10 +317,12 @@ class _PremiumMemberCard extends StatelessWidget {
                     fontSize: 16,
                   ),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 4),
                 Text(
-                  'Unafurahia chaneli zote bila mipaka',
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                  user.expiryDate != null
+                      ? 'Inaisha: ${user.expiryLabel}'
+                      : 'Unafurahia chaneli zote bila mipaka',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
               ],
             ),

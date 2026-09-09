@@ -30,6 +30,7 @@ abstract final class AppStrings {
   static const simu = 'Simu';
   static const haliYaAkaunti = 'Hali ya Akaunti';
   static const mudaWaUsajili = 'Muda wa Usajili';
+  static const kitambulishoChaKifaa = 'Kitambulisho cha Kifaa';
 
   static const badiliLugha = 'Badili Lugha';
   static const arifa = 'Arifa';

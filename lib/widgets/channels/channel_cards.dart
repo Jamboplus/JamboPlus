@@ -41,10 +41,10 @@ class _ChannelGridCardState extends State<ChannelGridCard> {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primaryIndigo.withValues(
-                  alpha: _pressed ? 0.15 : 0.08,
+                color: Colors.black.withValues(
+                  alpha: _pressed ? 0.18 : 0.10,
                 ),
-                blurRadius: _pressed ? 20 : 12,
+                blurRadius: _pressed ? 18 : 12,
                 offset: Offset(0, _pressed ? 8 : 4),
               ),
             ],
@@ -59,24 +59,32 @@ class _ChannelGridCardState extends State<ChannelGridCard> {
                   CachedNetworkImage(
                     imageUrl: widget.channel.image,
                     fit: BoxFit.cover,
+                    filterQuality: FilterQuality.high,
+                    fadeInDuration: const Duration(milliseconds: 200),
                     placeholder: (_, __) => Container(
-                      color: AppColors.primaryIndigo.withValues(alpha: 0.1),
+                      color: Colors.black12,
                     ),
                     errorWidget: (_, __, ___) => Container(
-                      decoration: const BoxDecoration(
-                        gradient: AppColors.primaryGradient,
+                      color: Colors.black26,
+                      child: const Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white54,
                       ),
                     ),
                   ),
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.75),
-                        ],
+                  // Soft bottom scrim only — keeps titles readable without blue tint.
+                  IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: const [0.45, 1.0],
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.45),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -108,6 +116,12 @@ class _ChannelGridCardState extends State<ChannelGridCard> {
                             color: Colors.white,
                             fontWeight: FontWeight.w700,
                             fontSize: 13,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black54,
+                                blurRadius: 6,
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -164,7 +178,7 @@ class _ChannelHorizontalCardState extends State<ChannelHorizontalCard> {
             borderRadius: BorderRadius.circular(18),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primaryIndigo.withValues(alpha: 0.12),
+                color: Colors.black.withValues(alpha: 0.14),
                 blurRadius: 16,
                 offset: const Offset(0, 6),
               ),
@@ -178,19 +192,31 @@ class _ChannelHorizontalCardState extends State<ChannelHorizontalCard> {
                 CachedNetworkImage(
                   imageUrl: widget.channel.image,
                   fit: BoxFit.cover,
+                  filterQuality: FilterQuality.high,
+                  fadeInDuration: const Duration(milliseconds: 200),
                   placeholder: (_, __) => Container(
-                    color: AppColors.primaryIndigo.withValues(alpha: 0.1),
+                    color: Colors.black12,
+                  ),
+                  errorWidget: (_, __, ___) => Container(
+                    color: Colors.black26,
+                    child: const Icon(
+                      Icons.broken_image_outlined,
+                      color: Colors.white54,
+                    ),
                   ),
                 ),
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.transparent,
-                        AppColors.primaryIndigo.withValues(alpha: 0.85),
-                      ],
+                IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        stops: const [0.5, 1.0],
+                        colors: [
+                          Colors.transparent,
+                          Colors.black.withValues(alpha: 0.42),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -222,6 +248,12 @@ class _ChannelHorizontalCardState extends State<ChannelHorizontalCard> {
                           color: Colors.white,
                           fontWeight: FontWeight.w800,
                           fontSize: 14,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black54,
+                              blurRadius: 6,
+                            ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -361,6 +393,22 @@ class _ChannelListTileState extends State<ChannelListTile> {
   }
 }
 
+/// Shared with home Mpira row so both sections match visually.
+const kBureCardAspectRatio = 0.82;
+const kBureFullCardAspectRatio = 1.55;
+
+/// Pixel height of a Bure pair card on the current screen width.
+double burePairCardHeight(BuildContext context) {
+  final screenWidth = MediaQuery.sizeOf(context).width;
+  final cardWidth = (screenWidth - 32 - 12) / 2; // horizontal padding + gap
+  return cardWidth / kBureCardAspectRatio;
+}
+
+double burePairCardWidth(BuildContext context) {
+  final screenWidth = MediaQuery.sizeOf(context).width;
+  return (screenWidth - 32 - 12) / 2;
+}
+
 /// Bure section layout: pairs in rows, last odd item spans full width.
 class BureChannelsGrid extends StatelessWidget {
   const BureChannelsGrid({
@@ -416,6 +464,7 @@ class BureChannelsGrid extends StatelessWidget {
         Expanded(
           child: ChannelGridCard(
             channel: a,
+            aspectRatio: kBureCardAspectRatio,
             onTap: () => onChannelTap?.call(a),
           ),
         ),
@@ -423,6 +472,7 @@ class BureChannelsGrid extends StatelessWidget {
         Expanded(
           child: ChannelGridCard(
             channel: b,
+            aspectRatio: kBureCardAspectRatio,
             onTap: () => onChannelTap?.call(b),
           ),
         ),
@@ -433,7 +483,7 @@ class BureChannelsGrid extends StatelessWidget {
   Widget _buildFull(BuildContext context, ChannelModel channel) {
     return ChannelGridCard(
       channel: channel,
-      aspectRatio: 16 / 7,
+      aspectRatio: kBureFullCardAspectRatio,
       onTap: () => onChannelTap?.call(channel),
     );
   }

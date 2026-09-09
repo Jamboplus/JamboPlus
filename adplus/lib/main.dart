@@ -6,10 +6,12 @@ import 'screens/admin_shell.dart';
 import 'screens/login_screen.dart';
 import 'state/admin_state.dart';
 import 'theme/admin_theme.dart';
+import 'widgets/admin_header.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   registerPlatformPlugins();
+  applyAdminSystemChrome();
   runApp(const JamboAdApp());
 }
 

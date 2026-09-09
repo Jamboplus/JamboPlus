@@ -141,12 +141,27 @@ class ApiService {
     }
   }
 
+  /// Fetch subscription status by stable device id. Returns null if not found.
+  Future<UserModel?> fetchUserByDeviceId(String deviceId) async {
+    try {
+      final response = await _dio.get<Map<String, dynamic>>(
+        '/v1/app/users/me',
+        queryParameters: {'deviceId': deviceId.trim()},
+      );
+      return UserModel.fromJson(response.data!);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
   /// Start SonicPesa Push USSD for a pricing plan.
   Future<Map<String, dynamic>> startPayment({
     required String name,
     required String phone,
     required String planId,
     int? amount,
+    String? deviceId,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/v1/app/payments/start',
@@ -155,6 +170,7 @@ class ApiService {
         'phone': phone.trim(),
         'planId': planId,
         if (amount != null) 'amount': amount,
+        if (deviceId != null && deviceId.isNotEmpty) 'deviceId': deviceId,
       },
     );
     return response.data ?? {};

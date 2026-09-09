@@ -15,6 +15,46 @@ const {
   appConfigForAdmin,
 } = require('../serializers');
 
+function normalizePhoneDigits(raw) {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+function addPremiumDuration(fromDate, amount, unit) {
+  const d = new Date(fromDate.getTime());
+  const n = Math.max(1, Number(amount) || 1);
+  switch (String(unit || 'days')) {
+    case 'minutes':
+      d.setUTCMinutes(d.getUTCMinutes() + n);
+      break;
+    case 'hours':
+      d.setUTCHours(d.getUTCHours() + n);
+      break;
+    case 'weeks':
+      d.setUTCDate(d.getUTCDate() + n * 7);
+      break;
+    default:
+      d.setUTCDate(d.getUTCDate() + n);
+      break;
+  }
+  return d.toISOString();
+}
+
+function findUserForAccess(db, body = {}) {
+  const userId = String(body.userId || body.id || '').trim();
+  if (userId) {
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) || null;
+  }
+  const phone = normalizePhoneDigits(body.phone);
+  if (phone.length >= 9) {
+    return db.prepare('SELECT * FROM users WHERE phone = ?').get(phone) || null;
+  }
+  const deviceId = String(body.deviceId || body.device_id || '').trim();
+  if (deviceId.length >= 8) {
+    return db.prepare('SELECT * FROM users WHERE device_id = ?').get(deviceId) || null;
+  }
+  return null;
+}
+
 function createAdminRoutes(db) {
   const router = express.Router();
 
@@ -74,45 +114,149 @@ function createAdminRoutes(db) {
     return res.json(userToJson(row));
   });
 
+  /**
+   * Grant / revoke premium by userId, phone, OR unique deviceId.
+   * POST /v1/admin/users/premium
+   * { action?: 'grant'|'revoke', userId?, phone?, deviceId?, amount?, unit? }
+   */
+  router.post('/users/premium', (req, res) => {
+    const action = String(req.body?.action || 'grant').toLowerCase().trim();
+    const user = findUserForAccess(db, req.body || {});
+    if (!user) {
+      return res.status(404).json({
+        error: 'Mtumiaji hajapatikana. Tumia kitambulisho cha kifaa, simu, au ID.',
+      });
+    }
+
+    if (action === 'revoke') {
+      db.prepare(
+        `UPDATE users SET package_type = 'free', expiry_date = NULL WHERE id = ?`,
+      ).run(user.id);
+      audit(db, req.admin.adminId, `user.revoke:${user.id}`);
+      const row = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+      return res.json(userToJson(row));
+    }
+
+    const amount = Math.max(1, parseIntSafe(req.body?.amount, 1));
+    const unit = String(req.body?.unit || 'days').toLowerCase();
+    const now = new Date();
+    let base = now;
+    if (user.package_type === 'premium' && user.expiry_date) {
+      const existing = new Date(user.expiry_date);
+      if (!Number.isNaN(existing.getTime()) && existing > now) base = existing;
+    }
+    const expiry = addPremiumDuration(base, amount, unit);
+    db.prepare(
+      `UPDATE users SET package_type = 'premium', expiry_date = ? WHERE id = ?`,
+    ).run(expiry, user.id);
+    audit(db, req.admin.adminId, `user.grant:${user.id}:${amount}${unit}`);
+    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    return res.json(userToJson(row));
+  });
+
   router.post('/users', (req, res) => {
     const name = req.body.name || 'Free User';
-    const phone = String(req.body.phone || '').replace(/\D/g, '');
-    if (phone.length < 9) {
-      return res.status(400).json({ error: 'Simu sahihi inahitajika' });
+    const phone = normalizePhoneDigits(req.body.phone);
+    const deviceId = String(req.body.deviceId || req.body.device_id || '').trim();
+    if (phone.length < 9 && deviceId.length < 8) {
+      return res.status(400).json({
+        error: 'Simu sahihi au kitambulisho cha kifaa (device id) kinahitajika',
+      });
     }
     const packageType = req.body.packageType || 'free';
     const expiryDate = req.body.expiryDate ?? null;
     const id = uuidv4();
     const createdAt = new Date().toISOString();
 
-    const dup = db.prepare('SELECT id FROM users WHERE phone = ?').get(phone);
-    if (dup) {
-      return res.status(409).json({ error: 'Namba hii tayari ipo' });
+    if (phone.length >= 9) {
+      const dup = db.prepare('SELECT id FROM users WHERE phone = ?').get(phone);
+      if (dup) {
+        return res.status(409).json({ error: 'Namba hii tayari ipo' });
+      }
+    }
+    if (deviceId.length >= 8) {
+      const dupDevice = db.prepare('SELECT id FROM users WHERE device_id = ?').get(deviceId);
+      if (dupDevice) {
+        return res.status(409).json({ error: 'Kitambulisho cha kifaa tayari kipo' });
+      }
     }
 
     db.prepare(
-      'INSERT INTO users (id, name, phone, package_type, expiry_date, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(id, name, phone, packageType, expiryDate, createdAt);
+      `INSERT INTO users (
+        id, name, phone, package_type, expiry_date, created_at, device_id, last_open_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      name,
+      phone.length >= 9 ? phone : '',
+      packageType,
+      expiryDate,
+      createdAt,
+      deviceId.length >= 8 ? deviceId : null,
+      createdAt,
+    );
     audit(db, req.admin.adminId, `user.create:${id}`);
 
-    return res.status(201).json(userToJson({ id, name, phone, package_type: packageType, expiry_date: expiryDate, created_at: createdAt }));
+    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    return res.status(201).json(userToJson(row));
   });
 
   router.put('/users/:id', (req, res) => {
-    const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(req.params.id);
+    const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
     if (!existing) return res.status(404).json({ error: 'User not found' });
 
     const { name, packageType } = req.body;
     if (name != null) db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, req.params.id);
+
     if (Object.prototype.hasOwnProperty.call(req.body, 'phone')) {
-      const phone = String(req.body.phone || '').replace(/\D/g, '');
-      if (phone.length < 9) {
+      const phone = normalizePhoneDigits(req.body.phone);
+      const deviceIdAfter = Object.prototype.hasOwnProperty.call(req.body, 'deviceId')
+        ? String(req.body.deviceId || '').trim()
+        : String(existing.device_id || '').trim();
+      if (phone.length > 0 && phone.length < 9) {
         return res.status(400).json({ error: 'Simu sahihi inahitajika' });
       }
-      const dup = db.prepare('SELECT id FROM users WHERE phone = ? AND id != ?').get(phone, req.params.id);
-      if (dup) return res.status(409).json({ error: 'Namba hii tayari ipo' });
+      if (phone.length === 0 && deviceIdAfter.length < 8) {
+        return res.status(400).json({
+          error: 'Akaunti inahitaji simu au kitambulisho cha kifaa',
+        });
+      }
+      if (phone.length >= 9) {
+        const dup = db
+          .prepare('SELECT id FROM users WHERE phone = ? AND id != ?')
+          .get(phone, req.params.id);
+        if (dup) return res.status(409).json({ error: 'Namba hii tayari ipo' });
+      }
       db.prepare('UPDATE users SET phone = ? WHERE id = ?').run(phone, req.params.id);
     }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'deviceId') ||
+        Object.prototype.hasOwnProperty.call(req.body, 'device_id')) {
+      const deviceId = String(req.body.deviceId || req.body.device_id || '').trim();
+      if (deviceId.length > 0 && deviceId.length < 8) {
+        return res.status(400).json({ error: 'Kitambulisho cha kifaa si sahihi' });
+      }
+      if (deviceId.length >= 8) {
+        const dup = db
+          .prepare('SELECT id FROM users WHERE device_id = ? AND id != ?')
+          .get(deviceId, req.params.id);
+        if (dup) {
+          return res.status(409).json({ error: 'Kitambulisho cha kifaa tayari kipo' });
+        }
+        db.prepare('UPDATE users SET device_id = ? WHERE id = ?').run(deviceId, req.params.id);
+      } else {
+        const phoneNow = Object.prototype.hasOwnProperty.call(req.body, 'phone')
+          ? normalizePhoneDigits(req.body.phone)
+          : normalizePhoneDigits(existing.phone);
+        if (phoneNow.length < 9) {
+          return res.status(400).json({
+            error: 'Huwezi kuondoa device id bila simu sahihi',
+          });
+        }
+        db.prepare('UPDATE users SET device_id = NULL WHERE id = ?').run(req.params.id);
+      }
+    }
+
     if (packageType != null) {
       db.prepare('UPDATE users SET package_type = ? WHERE id = ?').run(packageType, req.params.id);
     }

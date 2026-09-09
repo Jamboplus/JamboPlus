@@ -242,32 +242,94 @@ class AdminState extends ChangeNotifier {
   }
 
   // ── Premium access helpers ──
-  Future<void> grantPremium(String id, int amount, String unit) async {
-    final now = DateTime.now();
-    final duration = switch (unit) {
-      'minutes' => Duration(minutes: amount),
-      'hours' => Duration(hours: amount),
-      'weeks' => Duration(days: amount * 7),
-      _ => Duration(days: amount),
-    };
-    final existing = _users.firstWhere((u) => u['id'] == id, orElse: () => {});
-    var base = now;
-    final expiry = existing['expiryDate'] as String?;
-    if (existing['packageType'] == 'premium' && expiry != null) {
-      final until = DateTime.parse(expiry);
-      if (until.isAfter(now)) base = until;
+  void _upsertUserLocal(Map<String, dynamic> updated) {
+    final id = updated['id'] as String?;
+    if (id == null) return;
+    final i = _users.indexWhere((u) => u['id'] == id);
+    if (i >= 0) {
+      _users[i] = updated;
+    } else {
+      _users.insert(0, updated);
     }
-    await updateUserRecord(id, {
-      'packageType': 'premium',
-      'expiryDate': base.add(duration).toUtc().toIso8601String(),
+  }
+
+  Future<void> grantPremium(String id, int amount, String unit) async {
+    final updated = await _api.setUserPremium({
+      'action': 'grant',
+      'userId': id,
+      'amount': amount,
+      'unit': unit,
     });
+    _upsertUserLocal(updated);
+    await _refreshDashboard();
+    notifyListeners();
+  }
+
+  /// Upgrade / extend premium using the user's unique device id from Mtumiaji.
+  Future<Map<String, dynamic>> grantPremiumByDeviceId(
+    String deviceId,
+    int amount,
+    String unit,
+  ) async {
+    final updated = await _api.setUserPremium({
+      'action': 'grant',
+      'deviceId': deviceId.trim(),
+      'amount': amount,
+      'unit': unit,
+    });
+    _upsertUserLocal(updated);
+    await _refreshDashboard();
+    notifyListeners();
+    return updated;
+  }
+
+  Future<Map<String, dynamic>> grantPremiumByPhone(
+    String phone,
+    int amount,
+    String unit,
+  ) async {
+    final updated = await _api.setUserPremium({
+      'action': 'grant',
+      'phone': phone.trim(),
+      'amount': amount,
+      'unit': unit,
+    });
+    _upsertUserLocal(updated);
+    await _refreshDashboard();
+    notifyListeners();
+    return updated;
   }
 
   Future<void> revokePremium(String id) async {
-    await updateUserRecord(id, {
-      'packageType': 'free',
-      'expiryDate': null,
+    final updated = await _api.setUserPremium({
+      'action': 'revoke',
+      'userId': id,
     });
+    _upsertUserLocal(updated);
+    await _refreshDashboard();
+    notifyListeners();
+  }
+
+  Future<Map<String, dynamic>> revokePremiumByDeviceId(String deviceId) async {
+    final updated = await _api.setUserPremium({
+      'action': 'revoke',
+      'deviceId': deviceId.trim(),
+    });
+    _upsertUserLocal(updated);
+    await _refreshDashboard();
+    notifyListeners();
+    return updated;
+  }
+
+  Future<Map<String, dynamic>> revokePremiumByPhone(String phone) async {
+    final updated = await _api.setUserPremium({
+      'action': 'revoke',
+      'phone': phone.trim(),
+    });
+    _upsertUserLocal(updated);
+    await _refreshDashboard();
+    notifyListeners();
+    return updated;
   }
 
   // ── Carousel ──

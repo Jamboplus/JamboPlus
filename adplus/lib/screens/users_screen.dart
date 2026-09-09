@@ -44,6 +44,17 @@ class UsersScreen extends StatelessWidget {
               ),
             ),
           ),
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: TextButton.icon(
+            onPressed: () => openUpgradeByUniqueId(context),
+            icon: const Icon(Icons.fingerprint_rounded, color: AdminColors.info, size: 18),
+            label: Text(
+              'Kwa ID',
+              style: AdminTheme.body(12, color: AdminColors.info, weight: FontWeight.w700),
+            ),
+          ),
+        ),
         AdminPrimaryButton(
           label: 'Ongeza',
           onTap: () => openUserEditor(context, isNew: true),
@@ -113,17 +124,21 @@ bool _isRegistered(Map<String, dynamic> user) {
 }
 
 String _userSubtitle(Map<String, dynamic> user) {
-  if (_isRegistered(user)) {
-    return user['phone'] as String? ?? '';
-  }
+  final phone = user['phone'] as String? ?? '';
   final deviceId = user['deviceId'] as String? ?? '';
+  final short = deviceId.length > 8
+      ? '…${deviceId.substring(deviceId.length - 8)}'
+      : deviceId;
+
+  if (_isRegistered(user)) {
+    if (short.isEmpty) return phone;
+    return '$phone · $short';
+  }
   if (deviceId.isEmpty) return 'App pekee';
-  final short = deviceId.length > 8 ? deviceId.substring(deviceId.length - 8) : deviceId;
-  return 'App pekee · …$short';
+  return 'App pekee · $short';
 }
 
 bool _hasPremium(Map<String, dynamic> user) {
-  if (!_isRegistered(user)) return false;
   if (user['packageType'] != 'premium') return false;
   final expiry = user['expiryDate'] as String?;
   if (expiry == null) return true;
@@ -148,6 +163,7 @@ Future<void> openUserEditor(
 }) async {
   final name = TextEditingController(text: user?['name'] as String? ?? '');
   final phone = TextEditingController(text: user?['phone'] as String? ?? '');
+  final deviceCtrl = TextEditingController(text: user?['deviceId'] as String? ?? '');
   var packageType = user?['packageType'] as String? ?? 'free';
   final expiryCtrl = TextEditingController(
     text: user?['expiryDate'] != null
@@ -167,8 +183,14 @@ Future<void> openUserEditor(
           adminFieldLabel('Jina'),
           adminTextField(controller: name, hint: 'Amani Joseph'),
           const SizedBox(height: 14),
-          adminFieldLabel('Simu'),
+          adminFieldLabel('Simu (hiari ikiwa kuna device id)'),
           adminTextField(controller: phone, hint: '0712345678', keyboardType: TextInputType.phone),
+          const SizedBox(height: 14),
+          adminFieldLabel('Kitambulisho cha kifaa (device id)'),
+          adminTextField(
+            controller: deviceCtrl,
+            hint: 'unique id kutoka Mtumiaji',
+          ),
           const SizedBox(height: 14),
           adminFieldLabel('Kifurushi'),
           DropdownButtonFormField<String>(
@@ -190,13 +212,22 @@ Future<void> openUserEditor(
             loading: saving,
             onTap: () async {
               if (name.text.trim().isEmpty) return;
+              final phoneDigits = phone.text.replaceAll(RegExp(r'\D'), '');
+              final deviceId = deviceCtrl.text.trim();
+              if (phoneDigits.length < 9 && deviceId.length < 8) {
+                setLocal(() {
+                  formError = 'Weka simu sahihi au kitambulisho cha kifaa';
+                });
+                return;
+              }
               setLocal(() {
                 saving = true;
                 formError = null;
               });
               final body = <String, dynamic>{
                 'name': name.text.trim(),
-                'phone': phone.text.trim(),
+                'phone': phoneDigits,
+                'deviceId': deviceId,
                 'packageType': packageType,
                 'expiryDate': expiryCtrl.text.trim().isEmpty
                     ? null
@@ -221,6 +252,265 @@ Future<void> openUserEditor(
       ),
     ),
   );
+}
+
+Future<void> openUpgradeByUniqueId(BuildContext context) async {
+  await showAdminSheet(
+    context: context,
+    title: 'Toa Premium kwa ID',
+    child: const _UpgradeByUniqueIdSheet(),
+  );
+}
+
+class _UpgradeByUniqueIdSheet extends StatefulWidget {
+  const _UpgradeByUniqueIdSheet();
+
+  @override
+  State<_UpgradeByUniqueIdSheet> createState() => _UpgradeByUniqueIdSheetState();
+}
+
+class _UpgradeByUniqueIdSheetState extends State<_UpgradeByUniqueIdSheet> {
+  final _idCtrl = TextEditingController();
+  int _amount = 7;
+  _DurationUnit _unit = _DurationUnit.days;
+  bool _busy = false;
+  String? _error;
+  Map<String, dynamic>? _lastUser;
+
+  static const _presets = <(int, _DurationUnit, String, IconData)>[
+    (30, _DurationUnit.minutes, '30 dakika', Icons.bolt_rounded),
+    (1, _DurationUnit.hours, '1 saa', Icons.schedule_rounded),
+    (1, _DurationUnit.days, '1 siku', Icons.today_rounded),
+    (7, _DurationUnit.days, '7 siku', Icons.date_range_rounded),
+    (30, _DurationUnit.days, '30 siku', Icons.calendar_month_rounded),
+  ];
+
+  @override
+  void dispose() {
+    _idCtrl.dispose();
+    super.dispose();
+  }
+
+  bool get _looksLikePhone {
+    final raw = _idCtrl.text.trim();
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    // Prefer explicit TZ phone shapes; otherwise treat as unique device id.
+    if (RegExp(r'^0\d{9}$').hasMatch(raw)) return true;
+    if (RegExp(r'^255\d{9}$').hasMatch(digits) && digits.length == 12) return true;
+    if (digits.length >= 9 && digits.length <= 12 && digits == raw) return true;
+    return false;
+  }
+
+  Future<void> _grant(int amount, _DurationUnit unit) async {
+    final raw = _idCtrl.text.trim();
+    if (raw.length < 8) {
+      setState(() => _error = 'Weka kitambulisho cha kifaa au namba ya simu');
+      return;
+    }
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final state = context.read<AdminState>();
+      final updated = _looksLikePhone
+          ? await state.grantPremiumByPhone(raw, amount, unit.name)
+          : await state.grantPremiumByDeviceId(raw, amount, unit.name);
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _lastUser = updated;
+        _amount = amount;
+        _unit = unit;
+      });
+      showSuccessSnackBar(
+        context,
+        'Premium imetolewa: ${updated['name'] ?? 'Mtumiaji'}',
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.message;
+      });
+    }
+  }
+
+  Future<void> _revoke() async {
+    final raw = _idCtrl.text.trim();
+    if (raw.length < 8) {
+      setState(() => _error = 'Weka kitambulisho cha kifaa au namba ya simu');
+      return;
+    }
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final state = context.read<AdminState>();
+      final updated = _looksLikePhone
+          ? await state.revokePremiumByPhone(raw)
+          : await state.revokePremiumByDeviceId(raw);
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _lastUser = updated;
+      });
+      showSuccessSnackBar(context, 'Ufikiaji umeondolewa');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Nakili kitambulisho cha kifaa kutoka skrini ya Mtumiaji kwenye app, '
+          'au tumia namba ya simu.',
+          style: AdminTheme.body(12, color: AdminColors.textSecondary),
+        ),
+        const SizedBox(height: 14),
+        adminFieldLabel('Device ID / Simu'),
+        adminTextField(
+          controller: _idCtrl,
+          hint: 'mf. abc123… au 0712345678',
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Ongeza haraka',
+          style: AdminTheme.body(13, color: AdminColors.textSecondary, weight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _presets.map((p) {
+            return Material(
+              color: AdminColors.surfaceLight.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                onTap: _busy ? null : () => _grant(p.$1, p.$2),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(p.$4, color: AdminColors.green, size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        p.$3,
+                        style: AdminTheme.body(12, color: AdminColors.textPrimary, weight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 18),
+        Text(
+          'Kiasi maalum',
+          style: AdminTheme.body(13, color: AdminColors.textSecondary, weight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            _StepButton(
+              icon: Icons.remove_rounded,
+              onTap: () => setState(() => _amount = (_amount - 1).clamp(1, 999)),
+            ),
+            Expanded(
+              child: Text(
+                '$_amount',
+                textAlign: TextAlign.center,
+                style: AdminTheme.heading(20, color: AdminColors.textPrimary),
+              ),
+            ),
+            _StepButton(
+              icon: Icons.add_rounded,
+              onTap: () => setState(() => _amount = (_amount + 1).clamp(1, 999)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          children: _DurationUnit.values.map((unit) {
+            final selected = unit == _unit;
+            final label = switch (unit) {
+              _DurationUnit.minutes => 'dakika',
+              _DurationUnit.hours => 'saa',
+              _DurationUnit.days => 'siku',
+              _DurationUnit.weeks => 'wiki',
+            };
+            return ChoiceChip(
+              label: Text(label),
+              selected: selected,
+              onSelected: (_) => setState(() => _unit = unit),
+              showCheckmark: false,
+              labelStyle: AdminTheme.body(
+                12,
+                color: selected ? Colors.white : AdminColors.textSecondary,
+                weight: FontWeight.w700,
+              ),
+              selectedColor: AdminColors.green,
+              backgroundColor: AdminColors.bg,
+              side: BorderSide(color: AdminColors.border.withValues(alpha: 0.35)),
+            );
+          }).toList(),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          adminFormError(_error!),
+        ],
+        if (_lastUser != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            'Imesasishwa: ${_lastUser!['name'] ?? '—'} · '
+            '${_remainingLabel(_lastUser!)}',
+            style: AdminTheme.body(12, color: AdminColors.green, weight: FontWeight.w700),
+          ),
+        ],
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : _revoke,
+                icon: const Icon(Icons.remove_circle_outline_rounded, size: 18),
+                label: Text('Ondoa', style: AdminTheme.body(13, weight: FontWeight.w800)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AdminColors.danger,
+                  side: BorderSide(color: AdminColors.danger.withValues(alpha: 0.7)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: adminSaveButton(
+                label: 'Toa Premium',
+                loading: _busy,
+                onTap: () => _grant(_amount, _unit),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 class _UserRow extends StatelessWidget {
@@ -439,6 +729,14 @@ class _AccessSheetState extends State<_AccessSheet> {
                     Text(
                       name,
                       style: AdminTheme.body(15, color: Colors.white, weight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _userSubtitle(u),
+                      style: AdminTheme.body(
+                        11,
+                        color: Colors.white.withValues(alpha: 0.85),
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Row(

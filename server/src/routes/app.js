@@ -104,17 +104,27 @@ function createAppRoutes(db) {
   });
 
   /**
-   * Subscription status for the user app (admin is source of truth for premium).
+   * Subscription status for the user app (admin / payment is source of truth).
    * GET /v1/app/users/me?phone=07XXXXXXXX
+   * GET /v1/app/users/me?deviceId=...
    */
   router.get('/users/me', signed, (req, res) => {
     const phone = normalizePhone(req.query.phone);
-    if (phone.length < 9) {
-      return res.status(400).json({ error: 'phone required' });
+    const deviceId = String(req.query.deviceId || '').trim();
+
+    if (phone.length >= 9) {
+      const row = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+      if (!row) return res.status(404).json({ error: 'User not found' });
+      return res.json(userToJson(row));
     }
-    const row = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
-    if (!row) return res.status(404).json({ error: 'User not found' });
-    return res.json(userToJson(row));
+
+    if (deviceId.length >= 8) {
+      const row = db.prepare('SELECT * FROM users WHERE device_id = ?').get(deviceId);
+      if (!row) return res.status(404).json({ error: 'User not found' });
+      return res.json(userToJson(row));
+    }
+
+    return res.status(400).json({ error: 'phone or deviceId required' });
   });
 
   /**
@@ -157,11 +167,15 @@ function createAppRoutes(db) {
     }
 
     if (byPhone) {
-      db.prepare('UPDATE users SET name = ?, device_id = COALESCE(device_id, ?) WHERE id = ?').run(
-        name,
-        deviceId || null,
-        byPhone.id,
-      );
+      if (deviceId.length >= 8) {
+        db.prepare('UPDATE users SET name = ?, device_id = ? WHERE id = ?').run(
+          name,
+          deviceId,
+          byPhone.id,
+        );
+      } else {
+        db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, byPhone.id);
+      }
       const row = db.prepare('SELECT * FROM users WHERE id = ?').get(byPhone.id);
       return res.json(userToJson(row));
     }
