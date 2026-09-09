@@ -57,6 +57,7 @@ final remoteContentProvider = FutureProvider<void>((ref) async {
 /// Invalidate everything the user app shows from admin.
 void invalidateRemoteContent(WidgetRef ref) {
   ref.invalidate(bootstrapProvider);
+  ref.invalidate(rawChannelsProvider);
   ref.invalidate(channelsProvider);
   ref.invalidate(carouselProvider);
   ref.invalidate(pricingProvider);

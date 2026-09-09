@@ -7,6 +7,7 @@ import 'package:jamboplus/core/support_contact.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
 import 'package:jamboplus/models/user_model.dart';
 import 'package:jamboplus/providers/app_config_provider.dart';
+import 'package:jamboplus/providers/channel_provider.dart';
 import 'package:jamboplus/providers/user_provider.dart';
 import 'package:jamboplus/screens/payment/payment_screen.dart';
 import 'package:jamboplus/widgets/common/glass_card.dart';
@@ -20,7 +21,16 @@ class UserScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(userProvider);
     final config = ref.watch(appConfigProvider);
+    final metaChannels = ref.watch(supportMetaChannelsProvider);
     final active = user.hasActiveSubscription;
+    final phoneLabel = SupportContact.displayPhone(
+      config,
+      channels: metaChannels,
+    );
+    final hours = SupportContact.supportHours(
+      config,
+      channels: metaChannels,
+    );
 
     return SafeArea(
       child: RefreshIndicator(
@@ -131,9 +141,12 @@ class UserScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
                     _WhatsAppHelpCard(
-                      phoneLabel: SupportContact.displayPhone(config),
-                      hours: SupportContact.supportHours(config),
-                      onTap: () => SupportContact.openWhatsApp(config),
+                      phoneLabel: phoneLabel,
+                      hours: hours,
+                      onTap: () => SupportContact.openWhatsApp(
+                        config,
+                        channels: metaChannels,
+                      ),
                     ),
                   ],
                 ),

@@ -73,11 +73,32 @@ class _PlayerConfigScreenState extends State<PlayerConfigScreen> {
     _whatsapp.text = c['whatsappNumber'] as String? ?? '';
     _whatsappMessage.text = c['whatsappMessage'] as String? ?? '';
     _supportHours.text = c['supportHours'] as String? ?? '';
+
+    // Fallback: load from dual-written system channel when API lacks columns.
+    if (_whatsapp.text.trim().isEmpty ||
+        _whatsappMessage.text.trim().isEmpty ||
+        _supportHours.text.trim().isEmpty) {
+      final meta = context.read<AdminState>().msaadaWhatsAppMeta;
+      if (meta != null) {
+        if (_whatsapp.text.trim().isEmpty) {
+          _whatsapp.text = (meta['phone'] as String? ?? meta['name'] as String? ?? '');
+        }
+        if (_whatsappMessage.text.trim().isEmpty) {
+          _whatsappMessage.text = meta['message'] as String? ?? '';
+        }
+        if (_supportHours.text.trim().isEmpty) {
+          _supportHours.text = meta['hours'] as String? ?? '';
+        }
+      }
+    }
   }
 
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
+      final phone = _whatsapp.text.trim();
+      final message = _whatsappMessage.text.trim();
+      final hours = _supportHours.text.trim();
       await context.read<AdminState>().saveAppConfig({
         'playerEngine': _player,
         'drmType': _drm,
@@ -89,11 +110,21 @@ class _PlayerConfigScreenState extends State<PlayerConfigScreen> {
         'appApiKey': _apiKey.text.trim(),
         'appApiSecret': _apiSecret.text.trim(),
         'maintenanceMode': _maintenance,
-        'whatsappNumber': _whatsapp.text.trim(),
-        'whatsappMessage': _whatsappMessage.text.trim(),
-        'supportHours': _supportHours.text.trim(),
+        'whatsappNumber': phone,
+        'whatsappMessage': message,
+        'supportHours': hours,
       });
-      if (mounted) showSuccessSnackBar(context, 'Imehifadhiwa');
+      if (!mounted) return;
+      final saved = context.read<AdminState>().appConfig;
+      if (saved != null) _bind(saved);
+      // Keep typed msaada values visible even if old API ignored app-config fields.
+      if (phone.isNotEmpty) _whatsapp.text = phone;
+      if (message.isNotEmpty) _whatsappMessage.text = message;
+      if (hours.isNotEmpty) _supportHours.text = hours;
+      showSuccessSnackBar(
+        context,
+        'Msaada WhatsApp umehifadhiwa — fungua upya app ya mtumiaji',
+      );
     } catch (e) {
       if (mounted) showErrorSnackBar(context, e.toString());
     } finally {

@@ -6,6 +6,7 @@ import 'package:jamboplus/core/constants/app_strings.dart';
 import 'package:jamboplus/core/support_contact.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
 import 'package:jamboplus/providers/app_config_provider.dart';
+import 'package:jamboplus/providers/channel_provider.dart';
 import 'package:jamboplus/widgets/common/glass_card.dart';
 
 class WhatsappScreen extends ConsumerWidget {
@@ -14,8 +15,15 @@ class WhatsappScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final config = ref.watch(appConfigProvider);
-    final phone = SupportContact.displayPhone(config);
-    final hours = SupportContact.supportHours(config);
+    final metaChannels = ref.watch(supportMetaChannelsProvider);
+    final phone = SupportContact.displayPhone(
+      config,
+      channels: metaChannels,
+    );
+    final hours = SupportContact.supportHours(
+      config,
+      channels: metaChannels,
+    );
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -75,7 +83,10 @@ class WhatsappScreen extends ConsumerWidget {
             ).animate().fadeIn(delay: 320.ms),
             const SizedBox(height: 32),
             GestureDetector(
-              onTap: () => SupportContact.openWhatsApp(config),
+              onTap: () => SupportContact.openWhatsApp(
+                config,
+                channels: metaChannels,
+              ),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 16),

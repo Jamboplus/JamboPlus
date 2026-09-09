@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -45,7 +47,45 @@ class AdminState extends ChangeNotifier {
   }
 
   List<Map<String, dynamic>> get users => List.unmodifiable(_users);
-  List<Map<String, dynamic>> get channels => List.unmodifiable(_channels);
+  List<Map<String, dynamic>> get channels => List.unmodifiable(
+        _channels.where((c) => c['id'] != _msaadaChannelId && c['category'] != '__system__'),
+      );
+
+  /// Hidden Msaada WhatsApp payload dual-written as a system channel.
+  Map<String, dynamic>? get msaadaWhatsAppMeta {
+    Map<String, dynamic>? row;
+    for (final c in _channels) {
+      if (c['id'] == _msaadaChannelId || c['category'] == '__system__') {
+        row = c;
+        break;
+      }
+    }
+    if (row == null) return null;
+    try {
+      final raw = row['description'];
+      if (raw is String && raw.trim().startsWith('{')) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) {
+          return {
+            ...decoded,
+            'name': row['name'],
+          };
+        }
+        if (decoded is Map) {
+          return {
+            ...Map<String, dynamic>.from(decoded),
+            'name': row['name'],
+          };
+        }
+      }
+    } catch (_) {}
+    return {
+      'phone': row['name'],
+      'name': row['name'],
+      'message': '',
+      'hours': '',
+    };
+  }
   List<Map<String, dynamic>> get carousel => List.unmodifiable(_carousel);
   List<Map<String, dynamic>> get pricing => List.unmodifiable(_pricing);
   Map<String, dynamic>? get appConfig => _appConfig;
@@ -170,7 +210,81 @@ class AdminState extends ChangeNotifier {
   // ── App config ──
   Future<void> saveAppConfig(Map<String, dynamic> body) async {
     _appConfig = await _api.updateAppConfig(body);
+    // Dual-write Msaada WhatsApp into a hidden system channel so the live
+    // production API (without whatsapp_* columns yet) still serves updates.
+    final phone = (body['whatsappNumber'] as String? ?? '').trim();
+    final message = (body['whatsappMessage'] as String? ?? '').trim();
+    final hours = (body['supportHours'] as String? ?? '').trim();
+    if (phone.isNotEmpty || message.isNotEmpty || hours.isNotEmpty) {
+      await _syncMsaadaWhatsAppChannel(
+        phone: phone.isNotEmpty
+            ? phone
+            : (_appConfig?['whatsappNumber'] as String? ?? ''),
+        message: message,
+        hours: hours,
+      );
+    }
     notifyListeners();
+  }
+
+  static const _msaadaChannelId = 'system-msaada-whatsapp';
+
+  Future<void> _syncMsaadaWhatsAppChannel({
+    required String phone,
+    required String message,
+    required String hours,
+  }) async {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    final normalized = digits.startsWith('0') && digits.length == 10
+        ? '255${digits.substring(1)}'
+        : digits;
+    final display = normalized.startsWith('255') && normalized.length >= 12
+        ? '0${normalized.substring(3)}'
+        : (phone.isNotEmpty ? phone : normalized);
+    final payload = <String, dynamic>{
+      'id': _msaadaChannelId,
+      'name': display.isNotEmpty ? display : 'Msaada WhatsApp',
+      'image': 'https://cdn-icons-png.flaticon.com/512/733/733585.png',
+      'category': '__system__',
+      'description': jsonEncode({
+        'v': 1,
+        'phone': normalized.isNotEmpty ? normalized : phone,
+        'message': message.isNotEmpty
+            ? message
+            : 'Habari, ninahitaji msaada kutoka JamboPlus.',
+        'hours': hours.isNotEmpty
+            ? hours
+            : 'Jumatatu - Jumapili: 08:00 - 22:00',
+      }),
+      'isPremium': false,
+      'isLive': false,
+      'streamUrl': '',
+      'sortOrder': 9999,
+      'enabled': true,
+    };
+
+    Map<String, dynamic> saved;
+    try {
+      saved = await _api.updateChannel(_msaadaChannelId, payload);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) {
+        saved = await _api.createChannel(payload);
+      } else {
+        // Insert may be needed when update fails for other reasons.
+        try {
+          saved = await _api.createChannel(payload);
+        } catch (_) {
+          rethrow;
+        }
+      }
+    }
+
+    final i = _channels.indexWhere((c) => c['id'] == _msaadaChannelId);
+    if (i >= 0) {
+      _channels[i] = saved;
+    } else {
+      _channels.add(saved);
+    }
   }
 
   // ── Users ──
