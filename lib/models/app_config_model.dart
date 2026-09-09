@@ -9,6 +9,9 @@ class AppConfigModel {
     required this.streamUserId,
     required this.appApiKey,
     required this.maintenanceMode,
+    this.whatsappNumber = '',
+    this.whatsappMessage = '',
+    this.supportHours = '',
   });
 
   final String playerEngine;
@@ -20,6 +23,9 @@ class AppConfigModel {
   final String streamUserId;
   final String appApiKey;
   final bool maintenanceMode;
+  final String whatsappNumber;
+  final String whatsappMessage;
+  final String supportHours;
 
   factory AppConfigModel.fromJson(Map<String, dynamic> json) {
     return AppConfigModel(
@@ -32,6 +38,9 @@ class AppConfigModel {
       streamUserId: json['streamUserId'] as String? ?? '',
       appApiKey: json['appApiKey'] as String? ?? '',
       maintenanceMode: json['maintenanceMode'] as bool? ?? false,
+      whatsappNumber: json['whatsappNumber'] as String? ?? '',
+      whatsappMessage: json['whatsappMessage'] as String? ?? '',
+      supportHours: json['supportHours'] as String? ?? '',
     );
   }
 }

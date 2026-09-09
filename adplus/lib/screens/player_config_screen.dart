@@ -22,6 +22,9 @@ class _PlayerConfigScreenState extends State<PlayerConfigScreen> {
   final _streamUserId = TextEditingController();
   final _apiKey = TextEditingController();
   final _apiSecret = TextEditingController();
+  final _whatsapp = TextEditingController();
+  final _whatsappMessage = TextEditingController();
+  final _supportHours = TextEditingController();
 
   String _player = 'exoplayer';
   String _drm = 'none';
@@ -50,6 +53,9 @@ class _PlayerConfigScreenState extends State<PlayerConfigScreen> {
     _streamUserId.dispose();
     _apiKey.dispose();
     _apiSecret.dispose();
+    _whatsapp.dispose();
+    _whatsappMessage.dispose();
+    _supportHours.dispose();
     super.dispose();
   }
 
@@ -64,6 +70,9 @@ class _PlayerConfigScreenState extends State<PlayerConfigScreen> {
     _streamUserId.text = c['streamUserId'] as String? ?? '';
     _apiKey.text = c['appApiKey'] as String? ?? '';
     _apiSecret.text = c['appApiSecret'] as String? ?? '';
+    _whatsapp.text = c['whatsappNumber'] as String? ?? '';
+    _whatsappMessage.text = c['whatsappMessage'] as String? ?? '';
+    _supportHours.text = c['supportHours'] as String? ?? '';
   }
 
   Future<void> _save() async {
@@ -80,6 +89,9 @@ class _PlayerConfigScreenState extends State<PlayerConfigScreen> {
         'appApiKey': _apiKey.text.trim(),
         'appApiSecret': _apiSecret.text.trim(),
         'maintenanceMode': _maintenance,
+        'whatsappNumber': _whatsapp.text.trim(),
+        'whatsappMessage': _whatsappMessage.text.trim(),
+        'supportHours': _supportHours.text.trim(),
       });
       if (mounted) showSuccessSnackBar(context, 'Imehifadhiwa');
     } catch (e) {
@@ -179,6 +191,58 @@ class _PlayerConfigScreenState extends State<PlayerConfigScreen> {
                   title: 'Maintenance mode',
                   value: _maintenance,
                   onChanged: (v) => setState(() => _maintenance = v),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: AdminColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AdminColors.border.withValues(alpha: 0.35)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Msaada WhatsApp',
+                  style: AdminTheme.body(15, color: AdminColors.textPrimary, weight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Namba hii inaonekana kwenye Mtumiaji na skrini ya WhatsApp kwenye app ya watumiaji.',
+                  style: AdminTheme.body(12, color: AdminColors.textHint),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _whatsapp,
+                  keyboardType: TextInputType.phone,
+                  style: AdminTheme.body(14, color: AdminColors.textPrimary),
+                  decoration: const InputDecoration(
+                    labelText: 'Namba ya WhatsApp',
+                    hintText: '0712345678 au 255712345678',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _whatsappMessage,
+                  maxLines: 2,
+                  style: AdminTheme.body(14, color: AdminColors.textPrimary),
+                  decoration: const InputDecoration(
+                    labelText: 'Ujumbe wa kwanza (hiari)',
+                    hintText: 'Habari, ninahitaji msaada…',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _supportHours,
+                  style: AdminTheme.body(14, color: AdminColors.textPrimary),
+                  decoration: const InputDecoration(
+                    labelText: 'Saa za msaada',
+                    hintText: 'Jumatatu - Jumapili: 08:00 - 22:00',
+                  ),
                 ),
               ],
             ),

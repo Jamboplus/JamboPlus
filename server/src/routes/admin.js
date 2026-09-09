@@ -491,11 +491,24 @@ function createAdminRoutes(db) {
 
   router.put('/app-config', (req, res) => {
     const current = loadAppConfigRow(db);
+    const whatsappRaw = req.body.whatsappNumber ?? req.body.whatsapp_number;
+    let whatsappNumber = current.whatsapp_number || '255712345678';
+    if (whatsappRaw != null) {
+      const digits = String(whatsappRaw).replace(/\D/g, '');
+      if (digits.length >= 9) {
+        // Normalize local 0XXXXXXXXX → 255XXXXXXXXX for wa.me
+        whatsappNumber =
+          digits.startsWith('0') && digits.length === 10
+            ? `255${digits.slice(1)}`
+            : digits;
+      }
+    }
     db.prepare(`
       UPDATE app_config SET
         player_engine = ?, drm_type = ?, stream_origin = ?, stream_referer = ?,
         user_agent = ?, token_refresh_url = ?, stream_user_id = ?,
-        app_api_key = ?, app_api_secret = ?, maintenance_mode = ?
+        app_api_key = ?, app_api_secret = ?, maintenance_mode = ?,
+        whatsapp_number = ?, whatsapp_message = ?, support_hours = ?
       WHERE id = 1
     `).run(
       req.body.playerEngine ?? current.player_engine,
@@ -508,6 +521,9 @@ function createAdminRoutes(db) {
       req.body.appApiKey ?? current.app_api_key,
       req.body.appApiSecret ?? current.app_api_secret,
       parseBool(req.body.maintenanceMode, current.maintenance_mode === 1) ? 1 : 0,
+      whatsappNumber,
+      req.body.whatsappMessage ?? req.body.whatsapp_message ?? current.whatsapp_message,
+      req.body.supportHours ?? req.body.support_hours ?? current.support_hours,
     );
     audit(db, req.admin.adminId, 'app_config.update');
     return res.json(appConfigForAdmin(loadAppConfigRow(db)));

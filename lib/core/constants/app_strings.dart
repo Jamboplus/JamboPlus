@@ -22,6 +22,8 @@ abstract final class AppStrings {
   static const funguaWhatsapp = 'Fungua WhatsApp';
   static const saaZaMsaada = 'Saa za Msaada';
   static const taarifaZaMsaada = 'Taarifa za Msaada';
+  static const msaada = 'Msaada';
+  static const msaadaWhatsapp = 'Msaada WhatsApp';
 
   static const freeUser = 'Free User';
   static const nambaHaijawekwa = 'Namba haijawekwa';

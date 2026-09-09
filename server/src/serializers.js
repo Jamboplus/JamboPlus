@@ -121,6 +121,10 @@ function appConfigForBootstrap(row) {
     streamUserId: row.stream_user_id,
     appApiKey: row.app_api_key,
     maintenanceMode: row.maintenance_mode === 1,
+    whatsappNumber: row.whatsapp_number || '255712345678',
+    whatsappMessage:
+      row.whatsapp_message || 'Habari, ninahitaji msaada kutoka JamboPlus.',
+    supportHours: row.support_hours || 'Jumatatu - Jumapili: 08:00 - 22:00',
   };
 }
 

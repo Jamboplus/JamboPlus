@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/constants/app_strings.dart';
+import 'package:jamboplus/core/support_contact.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
 import 'package:jamboplus/models/user_model.dart';
+import 'package:jamboplus/providers/app_config_provider.dart';
 import 'package:jamboplus/providers/user_provider.dart';
 import 'package:jamboplus/screens/payment/payment_screen.dart';
 import 'package:jamboplus/widgets/common/glass_card.dart';
@@ -17,11 +19,15 @@ class UserScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(userProvider);
+    final config = ref.watch(appConfigProvider);
     final active = user.hasActiveSubscription;
 
     return SafeArea(
       child: RefreshIndicator(
-        onRefresh: () => ref.read(userProvider.notifier).refresh(),
+        onRefresh: () async {
+          invalidateRemoteContent(ref);
+          await ref.read(userProvider.notifier).refresh();
+        },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(
             parent: BouncingScrollPhysics(),
@@ -112,7 +118,26 @@ class UserScreen extends ConsumerWidget {
                       ),
                   ],
                 ),
-              ).animate().fadeIn(delay: 500.ms),
+              ).animate().fadeIn(delay: 400.ms),
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      AppStrings.msaada,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    _WhatsAppHelpCard(
+                      phoneLabel: SupportContact.displayPhone(config),
+                      hours: SupportContact.supportHours(config),
+                      onTap: () => SupportContact.openWhatsApp(config),
+                    ),
+                  ],
+                ),
+              ).animate().fadeIn(delay: 550.ms),
               const SizedBox(height: 24),
             ],
           ),
@@ -328,6 +353,92 @@ class _PremiumMemberCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _WhatsAppHelpCard extends StatelessWidget {
+  const _WhatsAppHelpCard({
+    required this.phoneLabel,
+    required this.hours,
+    required this.onTap,
+  });
+
+  final String phoneLabel;
+  final String hours;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Ink(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF25D366), Color(0xFF128C7E)],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF25D366).withValues(alpha: 0.3),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.chat_rounded, color: Colors.white, size: 28),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      AppStrings.msaadaWhatsapp,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      phoneLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hours,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 16),
+            ],
+          ),
+        ),
       ),
     );
   }

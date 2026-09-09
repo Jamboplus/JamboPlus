@@ -99,6 +99,7 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS payment_transactions_status_idx ON payment_transactions(status);
   `);
   migrateUserDeviceColumns(db);
+  migrateAppConfigSupportColumns(db);
 }
 
 function migrateUserDeviceColumns(db) {
@@ -123,6 +124,23 @@ function migrateUserDeviceColumns(db) {
   db.exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS users_device_id_unique ON users(device_id) WHERE device_id IS NOT NULL AND device_id != ''",
   );
+}
+
+function migrateAppConfigSupportColumns(db) {
+  const cols = db.prepare('PRAGMA table_info(app_config)').all().map((c) => c.name);
+  if (!cols.includes('whatsapp_number')) {
+    db.exec("ALTER TABLE app_config ADD COLUMN whatsapp_number TEXT NOT NULL DEFAULT '255712345678'");
+  }
+  if (!cols.includes('whatsapp_message')) {
+    db.exec(
+      "ALTER TABLE app_config ADD COLUMN whatsapp_message TEXT NOT NULL DEFAULT 'Habari, ninahitaji msaada kutoka JamboPlus.'",
+    );
+  }
+  if (!cols.includes('support_hours')) {
+    db.exec(
+      "ALTER TABLE app_config ADD COLUMN support_hours TEXT NOT NULL DEFAULT 'Jumatatu - Jumapili: 08:00 - 22:00'",
+    );
+  }
 }
 
 function seedIfEmpty(db) {

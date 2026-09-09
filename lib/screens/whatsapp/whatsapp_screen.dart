@@ -1,25 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/constants/app_constants.dart';
 import 'package:jamboplus/core/constants/app_strings.dart';
+import 'package:jamboplus/core/support_contact.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
+import 'package:jamboplus/providers/app_config_provider.dart';
 import 'package:jamboplus/widgets/common/glass_card.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-class WhatsappScreen extends StatelessWidget {
+class WhatsappScreen extends ConsumerWidget {
   const WhatsappScreen({super.key});
 
-  Future<void> _openWhatsApp() async {
-    final uri = Uri.parse(
-      'https://wa.me/${AppConstants.whatsappNumber}?text=${Uri.encodeComponent(AppConstants.whatsappMessage)}',
-    );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final config = ref.watch(appConfigProvider);
+    final phone = SupportContact.displayPhone(config);
+    final hours = SupportContact.supportHours(config);
+
     return SafeArea(
       child: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
@@ -67,9 +64,18 @@ class WhatsappScreen extends StatelessWidget {
               'Tuko hapa kukusaidia kila wakati',
               style: TextStyle(color: AppColors.textSecondary),
             ).animate().fadeIn(delay: 300.ms),
+            const SizedBox(height: 8),
+            Text(
+              phone,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+                color: Color(0xFF128C7E),
+              ),
+            ).animate().fadeIn(delay: 320.ms),
             const SizedBox(height: 32),
             GestureDetector(
-              onTap: _openWhatsApp,
+              onTap: () => SupportContact.openWhatsApp(config),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -132,7 +138,7 @@ class WhatsappScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              AppConstants.supportHours,
+                              hours,
                               style: TextStyle(color: AppColors.textSecondary),
                             ),
                           ],
