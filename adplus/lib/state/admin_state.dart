@@ -207,6 +207,12 @@ class AdminState extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Don't block save UX on a second dashboard round-trip.
+  void _refreshDashboardSoon() {
+    // ignore: unawaited_futures
+    _refreshDashboard();
+  }
+
   // ── App config ──
   Future<void> saveAppConfig(Map<String, dynamic> body) async {
     _appConfig = await _api.updateAppConfig(body);
@@ -291,7 +297,7 @@ class AdminState extends ChangeNotifier {
   Future<Map<String, dynamic>> addUser(Map<String, dynamic> body) async {
     final created = await _api.createUser(body);
     _users.insert(0, created);
-    await _refreshDashboard();
+    _refreshDashboardSoon();
     notifyListeners();
     return created;
   }
@@ -300,21 +306,21 @@ class AdminState extends ChangeNotifier {
     final updated = await _api.updateUser(id, body);
     final i = _users.indexWhere((u) => u['id'] == id);
     if (i >= 0) _users[i] = updated;
-    await _refreshDashboard();
+    _refreshDashboardSoon();
     notifyListeners();
   }
 
   Future<void> removeUser(String id) async {
     await _api.deleteUser(id);
     _users.removeWhere((u) => u['id'] == id);
-    await _refreshDashboard();
+    _refreshDashboardSoon();
     notifyListeners();
   }
 
   Future<int> removeAllUsers() async {
     final n = await _api.deleteAllUsers();
     _users.clear();
-    await _refreshDashboard();
+    _refreshDashboardSoon();
     notifyListeners();
     return n;
   }
@@ -323,7 +329,7 @@ class AdminState extends ChangeNotifier {
   Future<Map<String, dynamic>> addChannel(Map<String, dynamic> body) async {
     final created = await _api.createChannel(body);
     _channels.add(created);
-    await _refreshDashboard();
+    _refreshDashboardSoon();
     notifyListeners();
     return created;
   }
@@ -338,7 +344,7 @@ class AdminState extends ChangeNotifier {
   Future<void> removeChannel(String id) async {
     await _api.deleteChannel(id);
     _channels.removeWhere((c) => c['id'] == id);
-    await _refreshDashboard();
+    _refreshDashboardSoon();
     notifyListeners();
   }
 
@@ -347,10 +353,14 @@ class AdminState extends ChangeNotifier {
     final item = _channels.removeAt(oldIndex);
     _channels.insert(newIndex, item);
     notifyListeners();
+    final updates = <Future<Map<String, dynamic>>>[];
     for (var i = 0; i < _channels.length; i++) {
       final id = _channels[i]['id'] as String;
-      final updated = await _api.updateChannel(id, {'sortOrder': i});
-      _channels[i] = updated;
+      updates.add(_api.updateChannel(id, {'sortOrder': i}));
+    }
+    final results = await Future.wait(updates);
+    for (var i = 0; i < results.length; i++) {
+      _channels[i] = results[i];
     }
     notifyListeners();
   }
@@ -375,8 +385,27 @@ class AdminState extends ChangeNotifier {
       'unit': unit,
     });
     _upsertUserLocal(updated);
-    await _refreshDashboard();
+    _refreshDashboardSoon();
     notifyListeners();
+  }
+
+  /// Upgrade / extend premium using fingerprint ID, phone, or user UUID.
+  Future<Map<String, dynamic>> grantPremiumByIdentifier(
+    String identifier,
+    int amount,
+    String unit,
+  ) async {
+    final raw = identifier.trim();
+    final updated = await _api.setUserPremium({
+      'action': 'grant',
+      'identifier': raw,
+      'amount': amount,
+      'unit': unit,
+    });
+    _upsertUserLocal(updated);
+    _refreshDashboardSoon();
+    notifyListeners();
+    return updated;
   }
 
   /// Upgrade / extend premium using the user's unique device id from Mtumiaji.
@@ -385,16 +414,7 @@ class AdminState extends ChangeNotifier {
     int amount,
     String unit,
   ) async {
-    final updated = await _api.setUserPremium({
-      'action': 'grant',
-      'deviceId': deviceId.trim(),
-      'amount': amount,
-      'unit': unit,
-    });
-    _upsertUserLocal(updated);
-    await _refreshDashboard();
-    notifyListeners();
-    return updated;
+    return grantPremiumByIdentifier(deviceId, amount, unit);
   }
 
   Future<Map<String, dynamic>> grantPremiumByPhone(
@@ -402,16 +422,7 @@ class AdminState extends ChangeNotifier {
     int amount,
     String unit,
   ) async {
-    final updated = await _api.setUserPremium({
-      'action': 'grant',
-      'phone': phone.trim(),
-      'amount': amount,
-      'unit': unit,
-    });
-    _upsertUserLocal(updated);
-    await _refreshDashboard();
-    notifyListeners();
-    return updated;
+    return grantPremiumByIdentifier(phone, amount, unit);
   }
 
   Future<void> revokePremium(String id) async {
@@ -420,30 +431,28 @@ class AdminState extends ChangeNotifier {
       'userId': id,
     });
     _upsertUserLocal(updated);
-    await _refreshDashboard();
+    _refreshDashboardSoon();
     notifyListeners();
+  }
+
+  Future<Map<String, dynamic>> revokePremiumByIdentifier(String identifier) async {
+    final raw = identifier.trim();
+    final updated = await _api.setUserPremium({
+      'action': 'revoke',
+      'identifier': raw,
+    });
+    _upsertUserLocal(updated);
+    _refreshDashboardSoon();
+    notifyListeners();
+    return updated;
   }
 
   Future<Map<String, dynamic>> revokePremiumByDeviceId(String deviceId) async {
-    final updated = await _api.setUserPremium({
-      'action': 'revoke',
-      'deviceId': deviceId.trim(),
-    });
-    _upsertUserLocal(updated);
-    await _refreshDashboard();
-    notifyListeners();
-    return updated;
+    return revokePremiumByIdentifier(deviceId);
   }
 
   Future<Map<String, dynamic>> revokePremiumByPhone(String phone) async {
-    final updated = await _api.setUserPremium({
-      'action': 'revoke',
-      'phone': phone.trim(),
-    });
-    _upsertUserLocal(updated);
-    await _refreshDashboard();
-    notifyListeners();
-    return updated;
+    return revokePremiumByIdentifier(phone);
   }
 
   // ── Carousel ──

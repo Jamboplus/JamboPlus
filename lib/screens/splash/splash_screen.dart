@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
+import 'package:jamboplus/providers/app_config_provider.dart';
 import 'package:jamboplus/screens/app_gate.dart';
 
-class SplashScreen extends StatefulWidget {
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends ConsumerState<SplashScreen> {
+  static const _minSplash = Duration(milliseconds: 900);
+
   @override
   void initState() {
     super.initState();
@@ -24,8 +28,19 @@ class _SplashScreenState extends State<SplashScreen> {
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Future<void>.delayed(const Duration(milliseconds: 2200), _goHome);
+      _warmupAndGo();
     });
+  }
+
+  Future<void> _warmupAndGo() async {
+    // Prefetch while the splash animates so AppGate rarely blocks.
+    final warmup = ref.read(remoteContentProvider.future);
+    await Future.wait<void>([
+      Future<void>.delayed(_minSplash),
+      warmup.then<void>((_) {}, onError: (_) {}),
+    ]);
+    if (!mounted) return;
+    _goHome();
   }
 
   void _goHome() {
@@ -51,7 +66,7 @@ class _SplashScreenState extends State<SplashScreen> {
             child: child,
           );
         },
-        transitionDuration: const Duration(milliseconds: 650),
+        transitionDuration: const Duration(milliseconds: 450),
       ),
     );
   }

@@ -11,25 +11,64 @@ import '../widgets/confirm_delete.dart';
 
 enum _DurationUnit { minutes, hours, days, weeks }
 
+String _digitsOnly(String raw) => raw.replaceAll(RegExp(r'\D'), '');
+
+/// Normalize TZ phones so 07… / 255… / 7… all match each other.
+Set<String> _phoneMatchKeys(String raw) {
+  final digits = _digitsOnly(raw);
+  if (digits.isEmpty) return {};
+  final keys = <String>{digits};
+  if (digits.startsWith('255') && digits.length == 12) {
+    keys.add('0${digits.substring(3)}');
+    keys.add(digits.substring(3));
+  } else if (digits.startsWith('0') && digits.length == 10) {
+    keys.add('255${digits.substring(1)}');
+    keys.add(digits.substring(1));
+  } else if (digits.length == 9 && RegExp(r'^[67]').hasMatch(digits)) {
+    keys.add('0$digits');
+    keys.add('255$digits');
+  }
+  return keys.where((k) => k.length >= 9).toSet();
+}
+
+bool _phonesMatch(String a, String b) {
+  final left = _phoneMatchKeys(a);
+  final right = _phoneMatchKeys(b);
+  if (left.isEmpty || right.isEmpty) return false;
+  return left.intersection(right).isNotEmpty;
+}
+
+bool _userMatchesQuery(Map<String, dynamic> u, String q) {
+  if (q.isEmpty) return true;
+  final lower = q.toLowerCase();
+  final name = (u['name'] as String? ?? '').toLowerCase();
+  final phone = u['phone'] as String? ?? '';
+  final deviceId = (u['deviceId'] as String? ?? '').toLowerCase();
+  final id = (u['id'] as String? ?? '').toLowerCase();
+  if (name.contains(lower)) return true;
+  if (deviceId.contains(lower)) return true;
+  if (id.contains(lower)) return true;
+  if (phone.toLowerCase().contains(lower)) return true;
+  if (_phoneMatchKeys(q).isNotEmpty && _phonesMatch(phone, q)) return true;
+  return false;
+}
+
 class UsersScreen extends StatelessWidget {
   const UsersScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AdminState>();
-    final q = state.userQuery.toLowerCase();
-    final list = state.users.where((u) {
-      if (q.isEmpty) return true;
-      final name = (u['name'] as String? ?? '').toLowerCase();
-      final phone = u['phone'] as String? ?? '';
-      final deviceId = u['deviceId'] as String? ?? '';
-      return name.contains(q) || phone.contains(q) || deviceId.toLowerCase().contains(q);
-    }).toList();
+    final q = state.userQuery.trim();
+    final list = state.users.where((u) => _userMatchesQuery(u, q)).toList();
 
     return AdminPage(
       toolbar: [
         Expanded(
-          child: SearchField(hint: 'Tafuta jina, simu, kifaa…', onChanged: state.setUserQuery),
+          child: SearchField(
+            hint: 'Tafuta jina, simu, fingerprint ID…',
+            onChanged: state.setUserQuery,
+          ),
         ),
         const SizedBox(width: 12),
         if (state.users.isNotEmpty)
@@ -63,7 +102,9 @@ class UsersScreen extends StatelessWidget {
       child: list.isEmpty
           ? Center(
               child: Text(
-                'Hakuna watumiaji',
+                q.isEmpty
+                    ? 'Hakuna watumiaji'
+                    : 'Hakuna matokeo ya "$q"',
                 style: AdminTheme.body(13, color: AdminColors.textHint),
               ),
             )
@@ -132,10 +173,10 @@ String _userSubtitle(Map<String, dynamic> user) {
 
   if (_isRegistered(user)) {
     if (short.isEmpty) return phone;
-    return '$phone · $short';
+    return '$phone · FP $short';
   }
   if (deviceId.isEmpty) return 'App pekee';
-  return 'App pekee · $short';
+  return 'App pekee · FP $short';
 }
 
 bool _hasPremium(Map<String, dynamic> user) {
@@ -186,10 +227,10 @@ Future<void> openUserEditor(
           adminFieldLabel('Simu (hiari ikiwa kuna device id)'),
           adminTextField(controller: phone, hint: '0712345678', keyboardType: TextInputType.phone),
           const SizedBox(height: 14),
-          adminFieldLabel('Kitambulisho cha kifaa (device id)'),
+          adminFieldLabel('Fingerprint ID (kitambulisho cha kifaa)'),
           adminTextField(
             controller: deviceCtrl,
-            hint: 'unique id kutoka Mtumiaji',
+            hint: 'Fingerprint ID kutoka skrini ya Mtumiaji',
           ),
           const SizedBox(height: 14),
           adminFieldLabel('Kifurushi'),
@@ -291,20 +332,10 @@ class _UpgradeByUniqueIdSheetState extends State<_UpgradeByUniqueIdSheet> {
     super.dispose();
   }
 
-  bool get _looksLikePhone {
-    final raw = _idCtrl.text.trim();
-    final digits = raw.replaceAll(RegExp(r'\D'), '');
-    // Prefer explicit TZ phone shapes; otherwise treat as unique device id.
-    if (RegExp(r'^0\d{9}$').hasMatch(raw)) return true;
-    if (RegExp(r'^255\d{9}$').hasMatch(digits) && digits.length == 12) return true;
-    if (digits.length >= 9 && digits.length <= 12 && digits == raw) return true;
-    return false;
-  }
-
   Future<void> _grant(int amount, _DurationUnit unit) async {
     final raw = _idCtrl.text.trim();
     if (raw.length < 8) {
-      setState(() => _error = 'Weka kitambulisho cha kifaa au namba ya simu');
+      setState(() => _error = 'Weka Fingerprint ID, simu, au ID ya mtumiaji');
       return;
     }
     if (_busy) return;
@@ -313,10 +344,11 @@ class _UpgradeByUniqueIdSheetState extends State<_UpgradeByUniqueIdSheet> {
       _error = null;
     });
     try {
-      final state = context.read<AdminState>();
-      final updated = _looksLikePhone
-          ? await state.grantPremiumByPhone(raw, amount, unit.name)
-          : await state.grantPremiumByDeviceId(raw, amount, unit.name);
+      final updated = await context.read<AdminState>().grantPremiumByIdentifier(
+            raw,
+            amount,
+            unit.name,
+          );
       if (!mounted) return;
       setState(() {
         _busy = false;
@@ -340,7 +372,7 @@ class _UpgradeByUniqueIdSheetState extends State<_UpgradeByUniqueIdSheet> {
   Future<void> _revoke() async {
     final raw = _idCtrl.text.trim();
     if (raw.length < 8) {
-      setState(() => _error = 'Weka kitambulisho cha kifaa au namba ya simu');
+      setState(() => _error = 'Weka Fingerprint ID, simu, au ID ya mtumiaji');
       return;
     }
     if (_busy) return;
@@ -349,10 +381,7 @@ class _UpgradeByUniqueIdSheetState extends State<_UpgradeByUniqueIdSheet> {
       _error = null;
     });
     try {
-      final state = context.read<AdminState>();
-      final updated = _looksLikePhone
-          ? await state.revokePremiumByPhone(raw)
-          : await state.revokePremiumByDeviceId(raw);
+      final updated = await context.read<AdminState>().revokePremiumByIdentifier(raw);
       if (!mounted) return;
       setState(() {
         _busy = false;
@@ -374,12 +403,12 @@ class _UpgradeByUniqueIdSheetState extends State<_UpgradeByUniqueIdSheet> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Nakili kitambulisho cha kifaa kutoka skrini ya Mtumiaji kwenye app, '
-          'au tumia namba ya simu.',
+          'Nakili Fingerprint ID kutoka skrini ya Mtumiaji kwenye app, '
+          'au tumia namba ya simu / ID ya akaunti.',
           style: AdminTheme.body(12, color: AdminColors.textSecondary),
         ),
         const SizedBox(height: 14),
-        adminFieldLabel('Device ID / Simu'),
+        adminFieldLabel('Fingerprint ID / Simu / User ID'),
         adminTextField(
           controller: _idCtrl,
           hint: 'mf. abc123… au 0712345678',

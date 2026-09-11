@@ -11,8 +11,8 @@ class AdminApi {
       : _dio = Dio(
           BaseOptions(
             baseUrl: AdminApiConfig.baseUrl,
-            connectTimeout: const Duration(seconds: 20),
-            receiveTimeout: const Duration(seconds: 20),
+            connectTimeout: const Duration(seconds: 12),
+            receiveTimeout: const Duration(seconds: 15),
             headers: {'Accept': 'application/json'},
           ),
         ) {

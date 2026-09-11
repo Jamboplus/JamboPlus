@@ -14,6 +14,31 @@ function normalizePhone(raw) {
   return String(raw || '').replace(/\D/g, '');
 }
 
+function phoneLookupVariants(raw) {
+  const digits = normalizePhone(raw);
+  if (!digits) return [];
+  const variants = new Set([digits]);
+  if (digits.startsWith('255') && digits.length === 12) {
+    variants.add(`0${digits.slice(3)}`);
+    variants.add(digits.slice(3));
+  } else if (digits.startsWith('0') && digits.length === 10) {
+    variants.add(`255${digits.slice(1)}`);
+    variants.add(digits.slice(1));
+  } else if (digits.length === 9 && /^[67]/.test(digits)) {
+    variants.add(`0${digits}`);
+    variants.add(`255${digits}`);
+  }
+  return [...variants].filter((v) => v.length >= 9);
+}
+
+function findUserByPhoneVariants(db, raw) {
+  for (const phone of phoneLookupVariants(raw)) {
+    const row = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+    if (row) return row;
+  }
+  return null;
+}
+
 function createAppRoutes(db) {
   const router = express.Router();
   const signed = appSignatureMiddleware(db);
@@ -109,11 +134,11 @@ function createAppRoutes(db) {
    * GET /v1/app/users/me?deviceId=...
    */
   router.get('/users/me', signed, (req, res) => {
-    const phone = normalizePhone(req.query.phone);
+    const phoneRaw = req.query.phone;
     const deviceId = String(req.query.deviceId || '').trim();
 
-    if (phone.length >= 9) {
-      const row = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+    if (phoneRaw != null && String(phoneRaw).trim()) {
+      const row = findUserByPhoneVariants(db, phoneRaw);
       if (!row) return res.status(404).json({ error: 'User not found' });
       return res.json(userToJson(row));
     }
@@ -134,13 +159,20 @@ function createAppRoutes(db) {
    */
   router.post('/users/register', signed, (req, res) => {
     const name = String(req.body.name || '').trim() || 'Free User';
-    const phone = normalizePhone(req.body.phone);
+    const phoneDigits = normalizePhone(req.body.phone);
+    // Prefer national 07… storage so admin/search/grant match payments.
+    let phone = phoneDigits;
+    if (phone.startsWith('255') && phone.length === 12) {
+      phone = `0${phone.slice(3)}`;
+    } else if (phone.length === 9 && /^[67]/.test(phone)) {
+      phone = `0${phone}`;
+    }
     const deviceId = String(req.body.deviceId || '').trim();
     if (phone.length < 9) {
       return res.status(400).json({ error: 'Simu sahihi inahitajika' });
     }
 
-    const byPhone = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+    const byPhone = findUserByPhoneVariants(db, phone) || findUserByPhoneVariants(db, phoneDigits);
     const byDevice = deviceId
       ? db.prepare('SELECT * FROM users WHERE device_id = ?').get(deviceId)
       : null;

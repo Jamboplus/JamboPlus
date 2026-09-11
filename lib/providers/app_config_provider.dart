@@ -32,8 +32,12 @@ final remoteContentProvider = FutureProvider<void>((ref) async {
 
   final storage = ref.read(storageServiceProvider);
   final api = ref.read(apiServiceProvider);
-  final deviceId = await storage.getOrCreateDeviceId();
-  final fcmToken = await PushNotificationService.currentToken();
+  final idAndToken = await Future.wait<String?>([
+    storage.getOrCreateDeviceId(),
+    PushNotificationService.currentToken(),
+  ]);
+  final deviceId = idAndToken[0]!;
+  final fcmToken = idAndToken[1];
   try {
     final heartbeatUser = await api.sendDeviceHeartbeat(
       deviceId: deviceId,
@@ -43,7 +47,7 @@ final remoteContentProvider = FutureProvider<void>((ref) async {
     );
     await ref.read(userProvider.notifier).seedFromDevice(heartbeatUser);
   } catch (_) {
-    // Offline — admin list updates on next open.
+    // Offline — keep cache; still try a light subscription sync.
     await ref.read(userProvider.notifier).syncFromServer();
   }
 
@@ -54,7 +58,7 @@ final remoteContentProvider = FutureProvider<void>((ref) async {
   );
 });
 
-/// Invalidate everything the user app shows from admin.
+/// Hard invalidate used by the gate retry button (may remount shell).
 void invalidateRemoteContent(WidgetRef ref) {
   ref.invalidate(bootstrapProvider);
   ref.invalidate(rawChannelsProvider);
@@ -62,4 +66,21 @@ void invalidateRemoteContent(WidgetRef ref) {
   ref.invalidate(carouselProvider);
   ref.invalidate(pricingProvider);
   ref.invalidate(remoteContentProvider);
+}
+
+/// Soft refresh: refetch content + subscription without tearing down MainShell.
+Future<void> softRefreshRemoteContent(WidgetRef ref) async {
+  ref.invalidate(bootstrapProvider);
+  ref.invalidate(rawChannelsProvider);
+  ref.invalidate(channelsProvider);
+  ref.invalidate(carouselProvider);
+  ref.invalidate(pricingProvider);
+
+  await Future.wait([
+    ref.read(bootstrapProvider.future),
+    ref.read(channelsProvider.future),
+    ref.read(carouselProvider.future),
+    ref.read(pricingProvider.future),
+    ref.read(userProvider.notifier).refresh(),
+  ]);
 }

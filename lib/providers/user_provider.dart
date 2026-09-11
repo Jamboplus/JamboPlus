@@ -19,8 +19,14 @@ class UserNotifier extends StateNotifier<UserModel> {
 
   final StorageService _storage;
   final ApiService _api;
+  Future<void>? _bootstrapFuture;
 
-  Future<void> _bootstrap() async {
+  Future<void> _bootstrap() {
+    return _bootstrapFuture ??= _loadCachedProfile();
+  }
+
+  /// Load local profile only — network sync is owned by remoteContent / refresh.
+  Future<void> _loadCachedProfile() async {
     final deviceId = await _storage.getOrCreateDeviceId();
     final cached = await _storage.getUser();
     if (cached != null) {
@@ -33,15 +39,16 @@ class UserNotifier extends StateNotifier<UserModel> {
     } else {
       state = UserModel.defaultUser.copyWith(deviceId: deviceId);
     }
-    await syncFromServer();
   }
 
   Future<void> refresh() async {
+    await _bootstrap();
     await syncFromServer();
   }
 
   /// Persist a server user payload and refresh push topics.
   Future<void> applyRemoteUser(UserModel remote) async {
+    await _bootstrap();
     final deviceId = remote.deviceId.isNotEmpty
         ? remote.deviceId
         : (state.deviceId.isNotEmpty
@@ -57,6 +64,7 @@ class UserNotifier extends StateNotifier<UserModel> {
 
   /// Seed / refresh from device heartbeat without wiping a registered phone.
   Future<void> seedFromDevice(UserModel remote) async {
+    await _bootstrap();
     final localDeviceId = await _storage.getOrCreateDeviceId();
     final deviceId = remote.deviceId.isNotEmpty ? remote.deviceId : localDeviceId;
 

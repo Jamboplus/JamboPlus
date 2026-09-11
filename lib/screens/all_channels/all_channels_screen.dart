@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/constants/app_strings.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
 import 'package:jamboplus/providers/channel_provider.dart';
+import 'package:jamboplus/providers/user_provider.dart';
 import 'package:jamboplus/screens/main_shell.dart';
 import 'package:jamboplus/widgets/channels/channel_cards.dart';
 import 'package:jamboplus/widgets/common/how_to_pay_fab.dart';
@@ -114,7 +115,12 @@ class AllChannelsScreen extends ConsumerWidget {
           Expanded(
             child: RefreshIndicator(
               onRefresh: () async {
+                ref.invalidate(rawChannelsProvider);
                 ref.invalidate(channelsProvider);
+                await Future.wait([
+                  ref.read(channelsProvider.future),
+                  ref.read(userProvider.notifier).refresh(),
+                ]);
               },
               child: channels.isEmpty
                   ? ListView(

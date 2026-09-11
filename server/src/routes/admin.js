@@ -19,6 +19,32 @@ function normalizePhoneDigits(raw) {
   return String(raw || '').replace(/\D/g, '');
 }
 
+/** Match DB phones stored as 07…, 255…, or 7… */
+function phoneLookupVariants(raw) {
+  const digits = normalizePhoneDigits(raw);
+  if (!digits) return [];
+  const variants = new Set([digits]);
+  if (digits.startsWith('255') && digits.length === 12) {
+    variants.add(`0${digits.slice(3)}`);
+    variants.add(digits.slice(3));
+  } else if (digits.startsWith('0') && digits.length === 10) {
+    variants.add(`255${digits.slice(1)}`);
+    variants.add(digits.slice(1));
+  } else if (digits.length === 9 && /^[67]/.test(digits)) {
+    variants.add(`0${digits}`);
+    variants.add(`255${digits}`);
+  }
+  return [...variants].filter((v) => v.length >= 9);
+}
+
+function findUserByPhoneVariants(db, raw) {
+  for (const phone of phoneLookupVariants(raw)) {
+    const row = db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+    if (row) return row;
+  }
+  return null;
+}
+
 function addPremiumDuration(fromDate, amount, unit) {
   const d = new Date(fromDate.getTime());
   const n = Math.max(1, Number(amount) || 1);
@@ -39,19 +65,62 @@ function addPremiumDuration(fromDate, amount, unit) {
   return d.toISOString();
 }
 
+function looksLikePhone(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return false;
+  const digits = normalizePhoneDigits(trimmed);
+  if (digits.length < 9 || digits.length > 12) return false;
+  // Reject values that still contain letters (fingerprint IDs).
+  if (/[a-z]/i.test(trimmed)) return false;
+  if (/^0\d{9}$/.test(digits) || (digits.startsWith('0') && digits.length === 10)) return true;
+  if (digits.startsWith('255') && digits.length === 12) return true;
+  if (digits.length === 9 && /^[67]/.test(digits)) return true;
+  return false;
+}
+
+function looksLikeUuid(raw) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    String(raw || '').trim(),
+  );
+}
+
 function findUserForAccess(db, body = {}) {
   const userId = String(body.userId || body.id || '').trim();
-  if (userId) {
-    return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) || null;
+  if (userId && looksLikeUuid(userId)) {
+    const byId = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (byId) return byId;
   }
-  const phone = normalizePhoneDigits(body.phone);
-  if (phone.length >= 9) {
-    return db.prepare('SELECT * FROM users WHERE phone = ?').get(phone) || null;
+
+  const phoneRaw = body.phone;
+  if (phoneRaw != null && String(phoneRaw).trim() && looksLikePhone(phoneRaw)) {
+    const byPhone = findUserByPhoneVariants(db, phoneRaw);
+    if (byPhone) return byPhone;
   }
+
   const deviceId = String(body.deviceId || body.device_id || '').trim();
-  if (deviceId.length >= 8) {
-    return db.prepare('SELECT * FROM users WHERE device_id = ?').get(deviceId) || null;
+  if (deviceId.length >= 8 && !looksLikePhone(deviceId) && !looksLikeUuid(deviceId)) {
+    const byDevice = db.prepare('SELECT * FROM users WHERE device_id = ?').get(deviceId);
+    if (byDevice) return byDevice;
   }
+
+  // Unified identifier: fingerprint / phone / UUID (admin "Kwa ID")
+  const identifier = String(body.identifier || body.uniqueId || '').trim();
+  const candidates = [...new Set([identifier, userId, deviceId].filter((v) => v.length >= 8))];
+  for (const value of candidates) {
+    if (looksLikeUuid(value)) {
+      const byId = db.prepare('SELECT * FROM users WHERE id = ?').get(value);
+      if (byId) return byId;
+      continue;
+    }
+    if (looksLikePhone(value)) {
+      const byPhone = findUserByPhoneVariants(db, value);
+      if (byPhone) return byPhone;
+      continue;
+    }
+    const byDevice = db.prepare('SELECT * FROM users WHERE device_id = ?').get(value);
+    if (byDevice) return byDevice;
+  }
+
   return null;
 }
 
@@ -81,22 +150,24 @@ function createAdminRoutes(db) {
   router.use(adminAuthMiddleware);
 
   router.get('/dashboard', (req, res) => {
-    const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
-    const premiumCount = db
+    const nowIso = new Date().toISOString();
+    const dateKey = nowIso.slice(0, 10);
+    const counts = db
       .prepare(
-        `SELECT COUNT(*) AS c FROM users
-         WHERE package_type = 'premium'
-           AND (expiry_date IS NULL OR expiry_date >= ?)`,
+        `SELECT
+           (SELECT COUNT(*) FROM users) AS userCount,
+           (SELECT COUNT(*) FROM users
+             WHERE package_type = 'premium'
+               AND (expiry_date IS NULL OR expiry_date >= ?)) AS premiumCount,
+           (SELECT COUNT(*) FROM channels) AS channelCount`,
       )
-      .get(new Date().toISOString()).c;
-    const channelCount = db.prepare('SELECT COUNT(*) AS c FROM channels').get().c;
-    const dateKey = new Date().toISOString().slice(0, 10);
+      .get(nowIso);
     const rev = db.prepare('SELECT amount, transaction_count FROM revenue_daily WHERE date = ?').get(dateKey);
 
     res.json({
-      userCount,
-      premiumCount,
-      channelCount,
+      userCount: counts.userCount,
+      premiumCount: counts.premiumCount,
+      channelCount: counts.channelCount,
       todayRevenue: rev ? rev.amount : 0,
       todayTransactionCount: rev ? rev.transaction_count : 0,
     });
@@ -156,7 +227,12 @@ function createAdminRoutes(db) {
 
   router.post('/users', (req, res) => {
     const name = req.body.name || 'Free User';
-    const phone = normalizePhoneDigits(req.body.phone);
+    let phone = normalizePhoneDigits(req.body.phone);
+    if (phone.startsWith('255') && phone.length === 12) {
+      phone = `0${phone.slice(3)}`;
+    } else if (phone.length === 9 && /^[67]/.test(phone)) {
+      phone = `0${phone}`;
+    }
     const deviceId = String(req.body.deviceId || req.body.device_id || '').trim();
     if (phone.length < 9 && deviceId.length < 8) {
       return res.status(400).json({
@@ -169,7 +245,7 @@ function createAdminRoutes(db) {
     const createdAt = new Date().toISOString();
 
     if (phone.length >= 9) {
-      const dup = db.prepare('SELECT id FROM users WHERE phone = ?').get(phone);
+      const dup = findUserByPhoneVariants(db, phone);
       if (dup) {
         return res.status(409).json({ error: 'Namba hii tayari ipo' });
       }

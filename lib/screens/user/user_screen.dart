@@ -35,8 +35,7 @@ class UserScreen extends ConsumerWidget {
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: () async {
-          invalidateRemoteContent(ref);
-          await ref.read(userProvider.notifier).refresh();
+          await softRefreshRemoteContent(ref);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(
@@ -94,7 +93,7 @@ class UserScreen extends ConsumerWidget {
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('Kitambulisho kimenakiliwa'),
+                                    content: Text('Fingerprint ID kimenakiliwa'),
                                     duration: Duration(seconds: 2),
                                   ),
                                 );

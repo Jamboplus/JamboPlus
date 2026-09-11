@@ -44,6 +44,8 @@ class AppGate extends ConsumerWidget {
     final bootstrap = ref.watch(bootstrapProvider);
 
     return remote.when(
+      skipLoadingOnReload: true,
+      skipLoadingOnRefresh: true,
       loading: () => const Scaffold(
         backgroundColor: Colors.transparent,
         body: AppBackground(

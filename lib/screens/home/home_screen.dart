@@ -4,6 +4,7 @@ import 'package:jamboplus/core/constants/app_strings.dart';
 import 'package:jamboplus/models/channel_model.dart';
 import 'package:jamboplus/providers/carousel_provider.dart';
 import 'package:jamboplus/providers/channel_provider.dart';
+import 'package:jamboplus/providers/user_provider.dart';
 import 'package:jamboplus/screens/main_shell.dart';
 import 'package:jamboplus/widgets/channels/channel_cards.dart';
 import 'package:jamboplus/widgets/common/premium_upgrade_card.dart';
@@ -26,11 +27,13 @@ class HomeScreen extends ConsumerWidget {
       child: ScrollAwareHowToPayScope(
         child: RefreshIndicator(
           onRefresh: () async {
+            ref.invalidate(rawChannelsProvider);
             ref.invalidate(channelsProvider);
             ref.invalidate(carouselProvider);
             await Future.wait([
               ref.read(channelsProvider.future),
               ref.read(carouselProvider.future),
+              ref.read(userProvider.notifier).refresh(),
             ]);
           },
           child: CustomScrollView(

@@ -8,8 +8,14 @@ class StorageService {
   static const _userKey = 'user_profile';
   static const _deviceIdKey = 'device_id';
 
+  SharedPreferences? _prefs;
+
+  Future<SharedPreferences> _instance() async {
+    return _prefs ??= await SharedPreferences.getInstance();
+  }
+
   Future<String> getOrCreateDeviceId() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _instance();
     final existing = prefs.getString(_deviceIdKey);
     if (existing != null && existing.length >= 8) return existing;
 
@@ -21,19 +27,19 @@ class StorageService {
   }
 
   Future<UserModel?> getUser() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _instance();
     final json = prefs.getString(_userKey);
     if (json == null) return null;
     return UserModel.fromJson(jsonDecode(json) as Map<String, dynamic>);
   }
 
   Future<void> saveUser(UserModel user) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _instance();
     await prefs.setString(_userKey, jsonEncode(user.toJson()));
   }
 
   Future<void> clearUser() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await _instance();
     await prefs.remove(_userKey);
   }
 }
