@@ -71,6 +71,7 @@ class AppDatabase {
         created_at TEXT NOT NULL
       )
     ''');
+    _addChannelWatchCountColumn();
     _db.execute('''
       CREATE TABLE IF NOT EXISTS channels (
         id TEXT PRIMARY KEY,
@@ -140,6 +141,18 @@ class AppDatabase {
         at TEXT NOT NULL
       )
     ''');
+  }
+
+  void _addChannelWatchCountColumn() {
+    final columns = _db.select('PRAGMA table_info(channels)');
+    if (columns.every((column) => column['name'] != 'watch_count')) {
+      _db.execute(
+        'ALTER TABLE channels ADD COLUMN watch_count INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    _db.execute(
+      "UPDATE channels SET category = 'Trending' WHERE category = 'Wanyama'",
+    );
   }
 
   void close() => _db.dispose();

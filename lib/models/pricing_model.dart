@@ -23,4 +23,12 @@ class PricingPlanModel {
           (json['price'] as num).toDouble(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'durationDays': durationDays,
+        'price': price,
+        'originalPrice': originalPrice,
+      };
 }

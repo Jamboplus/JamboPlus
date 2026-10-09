@@ -33,7 +33,7 @@ class SectionHeader extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge,
             ),
           ),
-          if (trailing != null) trailing!,
+          ?trailing,
         ],
       ),
     ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.05, end: 0);

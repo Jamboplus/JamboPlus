@@ -14,6 +14,7 @@ Map<String, dynamic> channelToJson(Map<String, Object?> row) {
     if (row['drm_clear_key'] != null) 'drmClearKey': row['drm_clear_key'],
     'sortOrder': row['sort_order'],
     'enabled': (row['enabled'] as int) == 1,
+    'watchCount': row['watch_count'] ?? 0,
   };
 }
 

@@ -171,7 +171,7 @@ Future<void> openChannelEditor(
           const SizedBox(height: 14),
           adminFieldLabel('DRM'),
           DropdownButtonFormField<String>(
-            value: drm,
+            initialValue: drm,
             dropdownColor: AdminColors.surfaceLight,
             style: AdminTheme.body(14, color: AdminColors.textPrimary),
             items: const [
@@ -273,7 +273,7 @@ class _CategoryChips extends StatelessWidget {
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: options.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (_, i) {
           final v = options[i];
           final label = v == 'all' ? 'Zote' : v;
@@ -404,7 +404,7 @@ class _ChannelThumb extends StatelessWidget {
         width: 48,
         height: 48,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => fallback,
+        errorBuilder: (_, _, _) => fallback,
         loadingBuilder: (_, child, progress) => progress == null ? child : fallback,
       ),
     );

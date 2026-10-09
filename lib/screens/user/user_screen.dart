@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/constants/app_strings.dart';
@@ -79,25 +78,14 @@ class UserScreen extends ConsumerWidget {
                         label: AppStrings.mudaWaUsajili,
                         value: user.expiryLabel,
                       ),
-                      _InfoRow(
-                        label: AppStrings.kitambulishoChaKifaa,
-                        value: user.deviceIdLabel,
-                        isLast: true,
-                        monospaced: true,
-                        onCopy: user.deviceId.isEmpty
-                            ? null
-                            : () async {
-                                await Clipboard.setData(
-                                  ClipboardData(text: user.deviceId),
-                                );
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Fingerprint ID kimenakiliwa'),
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
-                              },
+                      _DeviceIdentityCard(
+                        user: user,
+                        onCopy: () => SupportContact.openWhatsApp(
+                          config,
+                          channels: metaChannels,
+                          message:
+                              'Habari, hii ni utambulisho wa kifaa changu: ${user.deviceId}',
+                        ),
                       ),
                     ],
                   ),
@@ -252,20 +240,121 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
+class _DeviceIdentityCard extends StatelessWidget {
+  const _DeviceIdentityCard({required this.user, required this.onCopy});
+
+  final UserModel user;
+  final Future<bool> Function() onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final available = user.deviceId.isNotEmpty;
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.background.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.surfaceBorder.withValues(alpha: 0.75)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.primaryCyan.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: const Icon(
+              Icons.phonelink_lock_rounded,
+              color: AppColors.primaryCyan,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppStrings.kitambulishoChaKifaa,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  user.deviceIdLabel,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: available
+                        ? AppColors.textSecondary
+                        : AppColors.textMuted,
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                if (available) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final opened = await onCopy();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(
+                          opened
+                              ? 'WhatsApp imefunguliwa na utambulisho wako'
+                              : 'WhatsApp haikupatikana kwenye kifaa hiki',
+                        ),
+                        duration: const Duration(seconds: 2),
+                      ));
+                    },
+                    icon: const Icon(Icons.copy_rounded, size: 15),
+                    label: const Text('Nakili utambulisho'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.primaryCyan,
+                      side: BorderSide(
+                        color: AppColors.primaryCyan.withValues(alpha: 0.45),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 8,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _InfoRow extends StatelessWidget {
   const _InfoRow({
     required this.label,
     required this.value,
-    this.isLast = false,
-    this.monospaced = false,
-    this.onCopy,
   });
 
   final String label;
   final String value;
-  final bool isLast;
-  final bool monospaced;
-  final VoidCallback? onCopy;
 
   @override
   Widget build(BuildContext context) {
@@ -285,28 +374,13 @@ class _InfoRow extends StatelessWidget {
                 child: Text(
                   value,
                   textAlign: TextAlign.end,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontFamily: monospaced ? 'monospace' : null,
-                    fontSize: monospaced ? 12 : null,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
-              if (onCopy != null) ...[
-                const SizedBox(width: 6),
-                IconButton(
-                  onPressed: onCopy,
-                  icon: const Icon(Icons.copy_rounded, size: 16),
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                  tooltip: 'Nakili',
-                ),
-              ],
             ],
           ),
         ),
-        if (!isLast) const Divider(height: 1),
+        const Divider(height: 1),
       ],
     );
   }

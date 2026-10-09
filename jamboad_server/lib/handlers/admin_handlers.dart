@@ -176,7 +176,7 @@ Future<Response> updateUserHandler(
     }
 
     db.audit(admin.adminId, 'user.update:$id');
-    return getUserHandler(request, admin, db, id);
+    return await getUserHandler(request, admin, db, id);
   } on FormatException {
     return errorResponse(400, 'Invalid JSON body');
   }
@@ -329,7 +329,7 @@ Future<Response> updateChannelHandler(
       ],
     );
     db.audit(admin.adminId, 'channel.update:$id');
-    return getChannelHandler(request, admin, db, id);
+    return await getChannelHandler(request, admin, db, id);
   } on FormatException {
     return errorResponse(400, 'Invalid JSON body');
   }
@@ -446,7 +446,7 @@ Future<Response> updateCarouselHandler(
       ],
     );
     db.audit(admin.adminId, 'carousel.update:$id');
-    return getCarouselItemHandler(request, admin, db, id);
+    return await getCarouselItemHandler(request, admin, db, id);
   } on FormatException {
     return errorResponse(400, 'Invalid JSON body');
   }
@@ -570,7 +570,7 @@ Future<Response> updatePricingHandler(
       ],
     );
     db.audit(admin.adminId, 'pricing.update:$id');
-    return getPricingHandler(request, admin, db, id);
+    return await getPricingHandler(request, admin, db, id);
   } on FormatException {
     return errorResponse(400, 'Invalid JSON body');
   }
@@ -636,7 +636,7 @@ Future<Response> putAppConfigAdminHandler(
       ],
     );
     db.audit(admin.adminId, 'app_config.update');
-    return getAppConfigAdminHandler(request, admin, db);
+    return await getAppConfigAdminHandler(request, admin, db);
   } on FormatException {
     return errorResponse(400, 'Invalid JSON body');
   }

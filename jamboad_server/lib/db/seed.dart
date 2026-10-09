@@ -1,13 +1,9 @@
-import 'dart:convert';
-import 'dart:math';
-
 import 'package:uuid/uuid.dart';
 
 import '../util/password.dart';
 import 'database.dart';
 
 const _uuid = Uuid();
-final _random = Random.secure();
 
 void seedIfEmpty(AppDatabase db) {
   final count =
@@ -106,11 +102,6 @@ void seedIfEmpty(AppDatabase db) {
   );
 }
 
-String _randomToken(int bytes) {
-  final data = List<int>.generate(bytes, (_) => _random.nextInt(256));
-  return base64Url.encode(data).replaceAll('=', '');
-}
-
 final _carouselRows = [
   ['1', 'https://picsum.photos/seed/soka1/800/400', 'Mpira wa Moja kwa Moja', '', 0],
   ['2', 'https://picsum.photos/seed/soka2/800/400', 'Tamthilia Bora Zaidi', '', 1],
@@ -171,12 +162,12 @@ final _channelRows = [
       'Anime kwa Kiswahili', true, true, ''),
   ('k4', 'Funny Toons', 'https://picsum.photos/seed/kat4/400/300', 'Katuni',
       'Katuni za kuchekesha', false, false, ''),
-  ('w1', 'Safari Live', 'https://picsum.photos/seed/wan1/400/300', 'Wanyama',
+  ('w1', 'Safari Live', 'https://picsum.photos/seed/wan1/400/300', 'Trending',
       'Maisha ya wanyama porini', true, true, ''),
-  ('w2', 'Ocean World', 'https://picsum.photos/seed/wan2/400/300', 'Wanyama',
+  ('w2', 'Ocean World', 'https://picsum.photos/seed/wan2/400/300', 'Trending',
       'Maisha ya baharini', true, false, ''),
-  ('w3', 'Bird Paradise', 'https://picsum.photos/seed/wan3/400/300', 'Wanyama',
+  ('w3', 'Bird Paradise', 'https://picsum.photos/seed/wan3/400/300', 'Trending',
       'Ndege wa duniani', false, true, ''),
-  ('w4', 'Wild Africa', 'https://picsum.photos/seed/wan4/400/300', 'Wanyama',
+  ('w4', 'Wild Africa', 'https://picsum.photos/seed/wan4/400/300', 'Trending',
       'Wanyama wa Afrika', true, false, ''),
 ];

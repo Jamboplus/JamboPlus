@@ -17,8 +17,9 @@ class ApiService {
             Dio(
               BaseOptions(
                 baseUrl: AppConstants.apiBaseUrl,
-                connectTimeout: const Duration(seconds: 12),
-                receiveTimeout: const Duration(seconds: 15),
+                connectTimeout: const Duration(seconds: 10),
+                receiveTimeout: const Duration(seconds: 12),
+                sendTimeout: const Duration(seconds: 10),
                 headers: {'Accept': 'application/json'},
               ),
             ) {
@@ -62,33 +63,84 @@ class ApiService {
     return '$normalizedBase$requestPath';
   }
 
+  bool _isRetryable(Object error) {
+    if (error is! DioException) return false;
+    switch (error.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.sendTimeout:
+      case DioExceptionType.receiveTimeout:
+      case DioExceptionType.connectionError:
+        return true;
+      case DioExceptionType.badResponse:
+        final code = error.response?.statusCode ?? 0;
+        return code == 502 || code == 503 || code == 504;
+      default:
+        return false;
+    }
+  }
+
+  Future<T> _withRetry<T>(
+    Future<T> Function() action, {
+    int retries = 2,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < retries; attempt++) {
+      try {
+        return await action();
+      } catch (e) {
+        lastError = e;
+        if (!_isRetryable(e) || attempt == retries - 1) rethrow;
+        await Future<void>.delayed(
+          Duration(milliseconds: 350 + attempt * 700),
+        );
+      }
+    }
+    throw lastError ?? StateError('retry failed');
+  }
+
   Future<BootstrapModel> fetchBootstrap() async {
-    final response = await _dio.get<Map<String, dynamic>>('/v1/app/bootstrap');
-    return BootstrapModel.fromJson(response.data!);
+    return _withRetry(() async {
+      final response = await _dio.get<Map<String, dynamic>>('/v1/app/bootstrap');
+      return BootstrapModel.fromJson(response.data!);
+    });
   }
 
   Future<List<CarouselModel>> fetchCarousel() async {
-    final response = await _dio.get<List<dynamic>>('/v1/app/carousel');
-    final list = response.data ?? [];
-    return list
-        .map((e) => CarouselModel.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return _withRetry(() async {
+      final response = await _dio.get<List<dynamic>>('/v1/app/carousel');
+      final list = response.data ?? [];
+      return list
+          .map((e) => CarouselModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    });
   }
 
   Future<List<ChannelModel>> fetchChannels() async {
-    final response = await _dio.get<List<dynamic>>('/v1/app/channels');
-    final list = response.data ?? [];
-    return list
-        .map((e) => ChannelModel.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return _withRetry(() async {
+      final response = await _dio.get<List<dynamic>>('/v1/app/channels');
+      final list = response.data ?? [];
+      return list
+          .map((e) => ChannelModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    });
+  }
+
+  Future<void> recordChannelWatch(String channelId) async {
+    try {
+      await _dio.post<void>('/v1/app/channels/$channelId/watch');
+    } catch (_) {
+      // Watching must continue if analytics is temporarily unavailable.
+    }
   }
 
   Future<List<PricingPlanModel>> fetchPricing() async {
-    final response = await _dio.get<List<dynamic>>('/v1/app/pricing');
-    final list = response.data ?? [];
-    return list
-        .map((e) => PricingPlanModel.fromJson(e as Map<String, dynamic>))
-        .toList();
+    return _withRetry(() async {
+      final response = await _dio.get<List<dynamic>>('/v1/app/pricing');
+      final list = response.data ?? [];
+      return list
+          .map((e) => PricingPlanModel.fromJson(e as Map<String, dynamic>))
+          .toList();
+    });
   }
 
   /// Register / refresh profile. Does not grant premium (admin controls that).
@@ -169,9 +221,14 @@ class ApiService {
         'name': name.trim(),
         'phone': phone.trim(),
         'planId': planId,
-        if (amount != null) 'amount': amount,
+        'amount': ?amount,
         if (deviceId != null && deviceId.isNotEmpty) 'deviceId': deviceId,
       },
+      options: Options(
+        // Server waits on SonicPesa only long enough to accept the push.
+        receiveTimeout: const Duration(seconds: 20),
+        sendTimeout: const Duration(seconds: 12),
+      ),
     );
     return response.data ?? {};
   }
@@ -181,6 +238,11 @@ class ApiService {
     final response = await _dio.get<Map<String, dynamic>>(
       '/v1/app/payments/status',
       queryParameters: {'orderId': orderId},
+      options: Options(
+        // Status is a local read; don't let a slow call block the next check.
+        receiveTimeout: const Duration(seconds: 8),
+        sendTimeout: const Duration(seconds: 8),
+      ),
     );
     return response.data ?? {};
   }

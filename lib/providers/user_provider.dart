@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:jamboplus/core/constants/app_constants.dart';
 import 'package:jamboplus/models/user_model.dart';
 import 'package:jamboplus/providers/service_providers.dart';
 import 'package:jamboplus/services/api_service.dart';
@@ -20,6 +22,7 @@ class UserNotifier extends StateNotifier<UserModel> {
   final StorageService _storage;
   final ApiService _api;
   Future<void>? _bootstrapFuture;
+  Future<void>? _refreshInFlight;
 
   Future<void> _bootstrap() {
     return _bootstrapFuture ??= _loadCachedProfile();
@@ -41,8 +44,32 @@ class UserNotifier extends StateNotifier<UserModel> {
     }
   }
 
-  Future<void> refresh() async {
+  /// Sync subscription from server. Prefer heartbeat so admin grants appear fast.
+  Future<void> refresh({bool heartbeat = true}) {
+    return _refreshInFlight ??= _refreshBody(heartbeat: heartbeat)
+        .whenComplete(() => _refreshInFlight = null);
+  }
+
+  Future<void> _refreshBody({required bool heartbeat}) async {
     await _bootstrap();
+    if (heartbeat) {
+      try {
+        final deviceId = state.deviceId.isNotEmpty
+            ? state.deviceId
+            : await _storage.getOrCreateDeviceId();
+        final fcmToken = await PushNotificationService.currentToken();
+        final remote = await _api.sendDeviceHeartbeat(
+          deviceId: deviceId,
+          fcmToken: fcmToken,
+          platform: defaultTargetPlatform.name,
+          appVersion: AppConstants.appVersion,
+        );
+        await seedFromDevice(remote);
+        return;
+      } catch (_) {
+        // Fall through to /users/me.
+      }
+    }
     await syncFromServer();
   }
 
@@ -133,32 +160,20 @@ class UserNotifier extends StateNotifier<UserModel> {
     return state;
   }
 
-  /// After SonicPesa success: merge device+phone, then apply activated user.
+  /// After SonicPesa success: unlock from the payment payload immediately.
+  /// A follow-up sync runs in the background so the success screen is not held
+  /// for another register round-trip.
   Future<UserModel> activateAfterPayment({
     required String name,
     required String phone,
     Map<String, dynamic>? userJson,
   }) async {
     final deviceId = await _storage.getOrCreateDeviceId();
-
-    // Always merge guest device row with the paid phone account.
-    try {
-      final registered = await _api.registerUser(
-        name: name,
-        phone: phone,
-        deviceId: deviceId,
-      );
-      await applyRemoteUser(registered);
-    } catch (_) {
-      // Still try status payload / phone sync below.
-      state = state.copyWith(name: name, phone: phone, deviceId: deviceId);
-      await _storage.saveUser(state);
-    }
+    var applied = false;
 
     if (userJson != null) {
       try {
         final fromStatus = UserModel.fromJson(userJson);
-        // Prefer premium fields from payment status (source of truth right after pay).
         await applyRemoteUser(
           fromStatus.copyWith(
             name: fromStatus.name.isNotEmpty ? fromStatus.name : name,
@@ -168,12 +183,16 @@ class UserNotifier extends StateNotifier<UserModel> {
                 : deviceId,
           ),
         );
-      } catch (_) {
-        // Fall through to phone sync.
-      }
+        applied = true;
+      } catch (_) {}
     }
 
-    await syncFromServer();
+    if (!applied) {
+      state = state.copyWith(name: name, phone: phone, deviceId: deviceId);
+      await _storage.saveUser(state);
+    }
+
+    unawaited(syncFromServer());
     return state;
   }
 }

@@ -85,43 +85,48 @@ function looksLikeUuid(raw) {
 }
 
 function findUserForAccess(db, body = {}) {
+  const tried = new Set();
+  const tryId = (value) => {
+    const id = String(value || '').trim();
+    if (!id || tried.has(`id:${id}`)) return null;
+    tried.add(`id:${id}`);
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(id) || null;
+  };
+  const tryDevice = (value) => {
+    const deviceId = String(value || '').trim();
+    if (deviceId.length < 8 || tried.has(`dev:${deviceId.toLowerCase()}`)) return null;
+    tried.add(`dev:${deviceId.toLowerCase()}`);
+    return (
+      db.prepare('SELECT * FROM users WHERE device_id = ?').get(deviceId) ||
+      db.prepare('SELECT * FROM users WHERE lower(device_id) = lower(?)').get(deviceId) ||
+      null
+    );
+  };
+  const tryPhone = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw || !looksLikePhone(raw) || tried.has(`phone:${raw}`)) return null;
+    tried.add(`phone:${raw}`);
+    return findUserByPhoneVariants(db, raw);
+  };
+
   const userId = String(body.userId || body.id || '').trim();
-  if (userId && looksLikeUuid(userId)) {
-    const byId = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    if (byId) return byId;
-  }
-
-  const phoneRaw = body.phone;
-  if (phoneRaw != null && String(phoneRaw).trim() && looksLikePhone(phoneRaw)) {
-    const byPhone = findUserByPhoneVariants(db, phoneRaw);
-    if (byPhone) return byPhone;
-  }
-
+  const phoneRaw = body.phone != null ? String(body.phone).trim() : '';
   const deviceId = String(body.deviceId || body.device_id || '').trim();
-  if (deviceId.length >= 8 && !looksLikePhone(deviceId) && !looksLikeUuid(deviceId)) {
-    const byDevice = db.prepare('SELECT * FROM users WHERE device_id = ?').get(deviceId);
-    if (byDevice) return byDevice;
-  }
-
-  // Unified identifier: fingerprint / phone / UUID (admin "Kwa ID")
   const identifier = String(body.identifier || body.uniqueId || '').trim();
-  const candidates = [...new Set([identifier, userId, deviceId].filter((v) => v.length >= 8))];
-  for (const value of candidates) {
-    if (looksLikeUuid(value)) {
-      const byId = db.prepare('SELECT * FROM users WHERE id = ?').get(value);
-      if (byId) return byId;
-      continue;
-    }
-    if (looksLikePhone(value)) {
-      const byPhone = findUserByPhoneVariants(db, value);
-      if (byPhone) return byPhone;
-      continue;
-    }
-    const byDevice = db.prepare('SELECT * FROM users WHERE device_id = ?').get(value);
-    if (byDevice) return byDevice;
-  }
 
-  return null;
+  return (
+    tryId(userId) ||
+    tryPhone(phoneRaw) ||
+    tryDevice(deviceId) ||
+    tryId(identifier) ||
+    tryPhone(identifier) ||
+    tryDevice(identifier) ||
+    tryId(deviceId) ||
+    tryPhone(deviceId) ||
+    tryDevice(userId) ||
+    tryPhone(userId) ||
+    null
+  );
 }
 
 function createAdminRoutes(db) {
@@ -179,26 +184,8 @@ function createAdminRoutes(db) {
     res.json(rows.map(userToJson));
   });
 
-  router.get('/users/:id', (req, res) => {
-    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
-    if (!row) return res.status(404).json({ error: 'User not found' });
-    return res.json(userToJson(row));
-  });
-
-  /**
-   * Grant / revoke premium by userId, phone, OR unique deviceId.
-   * POST /v1/admin/users/premium
-   * { action?: 'grant'|'revoke', userId?, phone?, deviceId?, amount?, unit? }
-   */
-  router.post('/users/premium', (req, res) => {
+  function applyPremiumAction(req, res, user) {
     const action = String(req.body?.action || 'grant').toLowerCase().trim();
-    const user = findUserForAccess(db, req.body || {});
-    if (!user) {
-      return res.status(404).json({
-        error: 'Mtumiaji hajapatikana. Tumia kitambulisho cha kifaa, simu, au ID.',
-      });
-    }
-
     if (action === 'revoke') {
       db.prepare(
         `UPDATE users SET package_type = 'free', expiry_date = NULL WHERE id = ?`,
@@ -222,6 +209,38 @@ function createAdminRoutes(db) {
     ).run(expiry, user.id);
     audit(db, req.admin.adminId, `user.grant:${user.id}:${amount}${unit}`);
     const row = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+    return res.json(userToJson(row));
+  }
+
+  /**
+   * Grant / revoke premium by userId, phone, OR unique deviceId.
+   * POST /v1/admin/users/premium
+   * Must be registered before /users/:id routes.
+   */
+  router.post('/users/premium', (req, res) => {
+    const user = findUserForAccess(db, req.body || {});
+    if (!user) {
+      return res.status(404).json({
+        error: 'Mtumiaji hajapatikana. Tumia kitambulisho cha kifaa, simu, au ID.',
+      });
+    }
+    return applyPremiumAction(req, res, user);
+  });
+
+  /** Reliable path-based grant/revoke: POST /v1/admin/users/:id/access */
+  router.post('/users/:id/access', (req, res) => {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    if (!user) {
+      return res.status(404).json({
+        error: 'Mtumiaji hajapatikana. Tumia kitambulisho cha kifaa, simu, au ID.',
+      });
+    }
+    return applyPremiumAction(req, res, user);
+  });
+
+  router.get('/users/:id', (req, res) => {
+    const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'User not found' });
     return res.json(userToJson(row));
   });
 

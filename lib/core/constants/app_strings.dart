@@ -12,6 +12,7 @@ abstract final class AppStrings {
   static const habari = 'Habari';
   static const katuni = 'Katuni';
   static const wanyama = 'Wanyama';
+  static const trending = 'Trending';
 
   static const premiumTitle = 'Fungua chaneli zote kwa punguzo la hadi 60%';
   static const premiumSubtitle =
@@ -32,7 +33,7 @@ abstract final class AppStrings {
   static const simu = 'Simu';
   static const haliYaAkaunti = 'Hali ya Akaunti';
   static const mudaWaUsajili = 'Muda wa Usajili';
-  static const kitambulishoChaKifaa = 'Fingerprint ID';
+  static const kitambulishoChaKifaa = 'Utambulisho wa kifaa';
 
   static const badiliLugha = 'Badili Lugha';
   static const arifa = 'Arifa';
@@ -59,5 +60,5 @@ abstract final class AppStrings {
   static const hakunaChaneli = 'Hakuna chaneli zilizopatikana';
   static const inapakia = 'Inapakia...';
 
-  static const categories = [zote, bure, mpira, tamthilia, habari, katuni, wanyama];
+  static const categories = [zote, bure, mpira, tamthilia, habari, katuni, trending];
 }

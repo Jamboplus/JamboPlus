@@ -11,20 +11,63 @@ import 'package:jamboplus/widgets/common/how_to_pay_fab.dart';
 import 'package:jamboplus/widgets/common/search_filter_bar.dart';
 import 'package:jamboplus/widgets/navigation/animated_bottom_nav.dart';
 
-class AllChannelsScreen extends ConsumerWidget {
+class AllChannelsScreen extends ConsumerStatefulWidget {
   const AllChannelsScreen({super.key});
 
+  @override
+  ConsumerState<AllChannelsScreen> createState() => _AllChannelsScreenState();
+}
+
+class _AllChannelsScreenState extends ConsumerState<AllChannelsScreen> {
+  final _categoryController = ScrollController();
+  var _showCategoryGuide = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _guideCategories());
+  }
+
+  Future<void> _guideCategories() async {
+    if (!_categoryController.hasClients ||
+        _categoryController.position.maxScrollExtent <= 0) {
+      if (mounted) setState(() => _showCategoryGuide = false);
+      return;
+    }
+
+    await _categoryController.animateTo(
+      _categoryController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 750),
+      curve: Curves.easeInOutCubic,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (!mounted || !_categoryController.hasClients) return;
+    await _categoryController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 650),
+      curve: Curves.easeOutCubic,
+    );
+    if (mounted) setState(() => _showCategoryGuide = false);
+  }
+
+  @override
+  void dispose() {
+    _categoryController.dispose();
+    super.dispose();
+  }
+
   static const _categories = [
+    AppStrings.zote,
     AppStrings.bure,
     AppStrings.mpira,
     AppStrings.tamthilia,
     AppStrings.habari,
     AppStrings.katuni,
-    AppStrings.wanyama,
+    AppStrings.trending,
   ];
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final query = ref.watch(allChannelsSearchProvider);
     final filter = ref.watch(allChannelsFilterProvider);
     final category = ref.watch(allChannelsCategoryProvider);
@@ -66,49 +109,95 @@ class AllChannelsScreen extends ConsumerWidget {
           const SizedBox(height: 12),
           SizedBox(
             height: 40,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: _categories.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final cat = _categories[index];
-                final isActive = category == cat;
-                return GestureDetector(
-                  onTap: () => ref
-                      .read(allChannelsCategoryProvider.notifier)
-                      .state = cat,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      gradient: isActive ? AppColors.primaryGradient : null,
-                      color: isActive ? null : AppColors.surface,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primaryIndigo.withValues(
-                            alpha: isActive ? 0.2 : 0.06,
-                          ),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
+            child: Stack(
+              children: [
+                ListView.separated(
+                  controller: _categoryController,
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: _categories.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (context, index) {
+                    final cat = _categories[index];
+                    final isActive = category == cat;
+                    return GestureDetector(
+                      onTap: () => ref
+                          .read(allChannelsCategoryProvider.notifier)
+                          .state = cat,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
                         ),
-                      ],
-                    ),
-                    child: Text(
-                      cat,
-                      style: TextStyle(
-                        color: isActive ? Colors.white : AppColors.textSecondary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
+                        decoration: BoxDecoration(
+                          gradient: isActive ? AppColors.primaryGradient : null,
+                          color: isActive ? null : AppColors.surface,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primaryIndigo.withValues(
+                                alpha: isActive ? 0.2 : 0.06,
+                              ),
+                              blurRadius: 10,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          cat,
+                          style: TextStyle(
+                            color: isActive
+                                ? Colors.white
+                                : AppColors.textSecondary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                Positioned.fill(
+                  right: 0,
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      opacity: _showCategoryGuide ? 1 : 0,
+                      duration: const Duration(milliseconds: 250),
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          padding: const EdgeInsets.only(left: 24, right: 12),
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Colors.transparent, AppColors.background],
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Telezesha',
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.swipe_rounded,
+                                color: AppColors.primaryCyan,
+                                size: 18,
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                );
-              },
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 8),
@@ -119,7 +208,7 @@ class AllChannelsScreen extends ConsumerWidget {
                 ref.invalidate(channelsProvider);
                 await Future.wait([
                   ref.read(channelsProvider.future),
-                  ref.read(userProvider.notifier).refresh(),
+                  ref.read(userProvider.notifier).refresh(heartbeat: true),
                 ]);
               },
               child: channels.isEmpty

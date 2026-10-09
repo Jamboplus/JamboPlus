@@ -24,6 +24,23 @@ Future<Response> appChannelsHandler(Request request, AppDatabase db) async {
   return jsonResponse(rows.map(channelToAppJson).toList());
 }
 
+Future<Response> appChannelWatchHandler(
+  Request request,
+  AppDatabase db,
+  String id,
+) async {
+  final result = db.raw.select(
+    'SELECT id FROM channels WHERE id = ? AND enabled = 1',
+    [id],
+  );
+  if (result.isEmpty) return errorResponse(404, 'Channel not found');
+  db.raw.execute(
+    'UPDATE channels SET watch_count = watch_count + 1 WHERE id = ?',
+    [id],
+  );
+  return Response(204);
+}
+
 Future<Response> appCarouselHandler(Request request, AppDatabase db) async {
   final rows = db.raw.select(
     '''

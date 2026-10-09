@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
@@ -10,6 +11,8 @@ import '../widgets/admin_widgets.dart';
 import '../widgets/confirm_delete.dart';
 
 enum _DurationUnit { minutes, hours, days, weeks }
+
+enum _UserFilter { all, premium, free, appOnly }
 
 String _digitsOnly(String raw) => raw.replaceAll(RegExp(r'\D'), '');
 
@@ -53,65 +56,290 @@ bool _userMatchesQuery(Map<String, dynamic> u, String q) {
   return false;
 }
 
-class UsersScreen extends StatelessWidget {
+class UsersScreen extends StatefulWidget {
   const UsersScreen({super.key});
+
+  @override
+  State<UsersScreen> createState() => _UsersScreenState();
+}
+
+class _UsersScreenState extends State<UsersScreen> {
+  _UserFilter _filter = _UserFilter.all;
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AdminState>();
     final q = state.userQuery.trim();
-    final list = state.users.where((u) => _userMatchesQuery(u, q)).toList();
+    final all = state.users;
+    final premiumN = all.where(_hasPremium).length;
+    final appOnlyN = all.where((u) => !_isRegistered(u)).length;
+    final freeN = all.length - premiumN;
+
+    final list = all.where((u) {
+      if (!_userMatchesQuery(u, q)) return false;
+      return switch (_filter) {
+        _UserFilter.all => true,
+        _UserFilter.premium => _hasPremium(u),
+        _UserFilter.free => !_hasPremium(u),
+        _UserFilter.appOnly => !_isRegistered(u),
+      };
+    }).toList();
 
     return AdminPage(
       toolbar: [
         Expanded(
-          child: SearchField(
-            hint: 'Tafuta jina, simu, fingerprint ID…',
+          child: ExpandableSearchBar(
+            hint: 'Tafuta jina, simu, au Fingerprint ID…',
+            query: state.userQuery,
             onChanged: state.setUserQuery,
-          ),
-        ),
-        const SizedBox(width: 12),
-        if (state.users.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: TextButton.icon(
-              onPressed: () => _wipeAllUsers(context),
-              icon: const Icon(Icons.delete_sweep_rounded, color: AdminColors.danger, size: 18),
-              label: Text(
-                'Futa Zote',
-                style: AdminTheme.body(12, color: AdminColors.danger, weight: FontWeight.w700),
+            collapsedActions: [
+              AdminIconAction(
+                icon: Icons.fingerprint_rounded,
+                tooltip: 'Toa Premium kwa ID',
+                color: AdminColors.info,
+                onTap: () => openUpgradeByUniqueId(context),
               ),
-            ),
+              if (all.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: PopupMenuButton<String>(
+                    tooltip: 'Hatua zaidi',
+                    color: AdminColors.surfaceLight,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    onSelected: (v) {
+                      if (v == 'wipe') _wipeAllUsers(context);
+                    },
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'wipe',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.delete_sweep_rounded, color: AdminColors.danger, size: 18),
+                            const SizedBox(width: 10),
+                            Text(
+                              'Futa watumiaji wote',
+                              style: AdminTheme.body(13, color: AdminColors.danger, weight: FontWeight.w700),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: AdminColors.surface,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AdminColors.border.withValues(alpha: 0.4)),
+                      ),
+                      child: const Icon(Icons.more_vert_rounded, color: AdminColors.textPrimary),
+                    ),
+                  ),
+                ),
+            ],
+            persistentActions: [
+              AdminIconAction(
+                icon: Icons.person_add_alt_1_rounded,
+                tooltip: 'Ongeza mtumiaji',
+                filled: true,
+                onTap: () => openUserEditor(context, isNew: true),
+              ),
+            ],
           ),
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: TextButton.icon(
-            onPressed: () => openUpgradeByUniqueId(context),
-            icon: const Icon(Icons.fingerprint_rounded, color: AdminColors.info, size: 18),
-            label: Text(
-              'Kwa ID',
-              style: AdminTheme.body(12, color: AdminColors.info, weight: FontWeight.w700),
-            ),
-          ),
-        ),
-        AdminPrimaryButton(
-          label: 'Ongeza',
-          onTap: () => openUserEditor(context, isNew: true),
         ),
       ],
-      child: list.isEmpty
-          ? Center(
-              child: Text(
-                q.isEmpty
-                    ? 'Hakuna watumiaji'
-                    : 'Hakuna matokeo ya "$q"',
-                style: AdminTheme.body(13, color: AdminColors.textHint),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _UserInsightRow(
+            total: all.length,
+            premium: premiumN,
+            free: freeN,
+            appOnly: appOnlyN,
+          ),
+          const SizedBox(height: 12),
+          _UserFilterBar(
+            selected: _filter,
+            onSelect: (v) => setState(() => _filter = v),
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: list.isEmpty
+                ? _UsersEmptyState(
+                    hasUsers: all.isNotEmpty,
+                    query: q,
+                    onAdd: () => openUserEditor(context, isNew: true),
+                    onClear: q.isEmpty
+                        ? null
+                        : () => state.setUserQuery(''),
+                  )
+                : ListView.builder(
+                    itemCount: list.length,
+                    itemBuilder: (_, i) => _UserCard(user: list[i]),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UserInsightRow extends StatelessWidget {
+  const _UserInsightRow({
+    required this.total,
+    required this.premium,
+    required this.free,
+    required this.appOnly,
+  });
+
+  final int total;
+  final int premium;
+  final int free;
+  final int appOnly;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(child: _InsightChip(label: 'Wote', value: '$total', color: AdminColors.info)),
+        const SizedBox(width: 8),
+        Expanded(child: _InsightChip(label: 'Premium', value: '$premium', color: AdminColors.green)),
+        const SizedBox(width: 8),
+        Expanded(child: _InsightChip(label: 'Bure', value: '$free', color: AdminColors.warning)),
+        const SizedBox(width: 8),
+        Expanded(child: _InsightChip(label: 'App', value: '$appOnly', color: AdminColors.textSecondary)),
+      ],
+    );
+  }
+}
+
+class _InsightChip extends StatelessWidget {
+  const _InsightChip({required this.label, required this.value, required this.color});
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AdminColors.border.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value, style: AdminTheme.heading(16, color: color)),
+          const SizedBox(height: 2),
+          Text(label, style: AdminTheme.body(10, color: AdminColors.textHint, weight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+class _UserFilterBar extends StatelessWidget {
+  const _UserFilterBar({required this.selected, required this.onSelect});
+
+  final _UserFilter selected;
+  final ValueChanged<_UserFilter> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    const items = <(_UserFilter, String)>[
+      (_UserFilter.all, 'Zote'),
+      (_UserFilter.premium, 'Premium'),
+      (_UserFilter.free, 'Bure'),
+      (_UserFilter.appOnly, 'App pekee'),
+    ];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: items.map((item) {
+          final on = item.$1 == selected;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: Text(item.$2),
+              selected: on,
+              onSelected: (_) => onSelect(item.$1),
+              showCheckmark: false,
+              labelStyle: AdminTheme.body(
+                12,
+                color: on ? Colors.white : AdminColors.textSecondary,
+                weight: FontWeight.w800,
               ),
-            )
-          : ListView.builder(
-              itemCount: list.length,
-              itemBuilder: (_, i) => _UserRow(user: list[i]),
+              selectedColor: AdminColors.green,
+              backgroundColor: AdminColors.surface,
+              side: BorderSide(color: AdminColors.border.withValues(alpha: 0.35)),
             ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _UsersEmptyState extends StatelessWidget {
+  const _UsersEmptyState({
+    required this.hasUsers,
+    required this.query,
+    required this.onAdd,
+    this.onClear,
+  });
+
+  final bool hasUsers;
+  final String query;
+  final VoidCallback onAdd;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final searching = query.isNotEmpty;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              searching ? Icons.search_off_rounded : Icons.people_outline_rounded,
+              size: 42,
+              color: AdminColors.textHint,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              searching
+                  ? 'Hakuna matokeo ya "$query"'
+                  : hasUsers
+                      ? 'Hakuna watumiaji kwenye kichujio hiki'
+                      : 'Hakuna watumiaji bado',
+              textAlign: TextAlign.center,
+              style: AdminTheme.body(14, color: AdminColors.textSecondary, weight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              searching
+                  ? 'Jaribu jina, namba ya simu, au Fingerprint ID'
+                  : 'Ongeza mtumiaji au toa Premium kwa ID',
+              textAlign: TextAlign.center,
+              style: AdminTheme.body(12, color: AdminColors.textHint),
+            ),
+            const SizedBox(height: 16),
+            if (onClear != null)
+              TextButton(onPressed: onClear, child: const Text('Futa utafutaji'))
+            else
+              FilledButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                label: const Text('Ongeza mtumiaji'),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -181,15 +409,14 @@ String _userSubtitle(Map<String, dynamic> user) {
 
 bool _hasPremium(Map<String, dynamic> user) {
   if (user['packageType'] != 'premium') return false;
-  final expiry = user['expiryDate'] as String?;
-  if (expiry == null) return true;
-  return !DateTime.parse(expiry).isBefore(DateTime.now());
+  final until = parseAdminDate(user['expiryDate'] as String?);
+  if (until == null) return true;
+  return !until.isBefore(DateTime.now());
 }
 
 String _remainingLabel(Map<String, dynamic> user) {
-  final expiry = user['expiryDate'] as String?;
-  if (expiry == null) return 'Premium';
-  final until = DateTime.parse(expiry);
+  final until = parseAdminDate(user['expiryDate'] as String?);
+  if (until == null) return 'Premium';
   final diff = until.difference(DateTime.now());
   if (diff.isNegative) return 'Imeisha';
   if (diff.inDays >= 1) return '${diff.inDays} siku';
@@ -206,10 +433,9 @@ Future<void> openUserEditor(
   final phone = TextEditingController(text: user?['phone'] as String? ?? '');
   final deviceCtrl = TextEditingController(text: user?['deviceId'] as String? ?? '');
   var packageType = user?['packageType'] as String? ?? 'free';
+  final parsedExpiry = parseAdminDate(user?['expiryDate'] as String?);
   final expiryCtrl = TextEditingController(
-    text: user?['expiryDate'] != null
-        ? DateFormat('yyyy-MM-dd').format(DateTime.parse(user!['expiryDate'] as String))
-        : '',
+    text: parsedExpiry != null ? DateFormat('yyyy-MM-dd').format(parsedExpiry) : '',
   );
   var saving = false;
   String? formError;
@@ -265,14 +491,19 @@ Future<void> openUserEditor(
                 saving = true;
                 formError = null;
               });
+              final expiryRaw = expiryCtrl.text.trim();
+              if (expiryRaw.isNotEmpty && toAdminExpiryIso(expiryRaw) == null) {
+                setLocal(() {
+                  formError = 'Tarehe si sahihi — tumia yyyy-MM-dd au dd/MM/yyyy';
+                });
+                return;
+              }
               final body = <String, dynamic>{
                 'name': name.text.trim(),
                 'phone': phoneDigits,
                 'deviceId': deviceId,
                 'packageType': packageType,
-                'expiryDate': expiryCtrl.text.trim().isEmpty
-                    ? null
-                    : '${expiryCtrl.text.trim()}T00:00:00.000Z',
+                'expiryDate': toAdminExpiryIso(expiryRaw),
               };
               try {
                 if (isNew) {
@@ -542,93 +773,223 @@ class _UpgradeByUniqueIdSheetState extends State<_UpgradeByUniqueIdSheet> {
   }
 }
 
-class _UserRow extends StatelessWidget {
-  const _UserRow({required this.user});
+class _UserCard extends StatelessWidget {
+  const _UserCard({required this.user});
 
   final Map<String, dynamic> user;
 
   @override
   Widget build(BuildContext context) {
     final premium = _hasPremium(user);
-    final expiry = user['expiryDate'] as String?;
+    final expiryAt = parseAdminDate(user['expiryDate'] as String?);
     final dateFmt = DateFormat.yMMMd();
+    final name = user['name'] as String? ?? '—';
+    final phone = user['phone'] as String? ?? '';
+    final deviceId = user['deviceId'] as String? ?? '';
 
-    return AdminListTile(
-      leading: CircleAvatar(
-        backgroundColor: premium
-            ? AdminColors.green.withValues(alpha: 0.25)
-            : AdminColors.navyMid.withValues(alpha: 0.35),
-        child: Icon(
-          premium ? Icons.workspace_premium_rounded : Icons.person_rounded,
-          color: premium ? AdminColors.green : Colors.white,
-          size: 22,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AdminColors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: premium
+              ? AdminColors.green.withValues(alpha: 0.35)
+              : AdminColors.border.withValues(alpha: 0.35),
         ),
       ),
-      title: user['name'] as String? ?? '—',
-      subtitle: _userSubtitle(user),
-      badges: [
-        if (!_isRegistered(user))
-          const StatusBadge('App pekee', color: AdminColors.info),
-        StatusBadge(
-          premium ? _remainingLabel(user) : 'Bure',
-          color: premium ? AdminColors.green : AdminColors.info,
-        ),
-        if (expiry != null)
-          StatusBadge(
-            'Mwisho ${dateFmt.format(DateTime.parse(expiry))}',
-            color: AdminColors.textSecondary,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 22,
+                backgroundColor: premium
+                    ? AdminColors.green.withValues(alpha: 0.22)
+                    : AdminColors.navyMid.withValues(alpha: 0.45),
+                child: Text(
+                  name.isNotEmpty ? name[0].toUpperCase() : '?',
+                  style: AdminTheme.body(
+                    16,
+                    color: premium ? AdminColors.green : Colors.white,
+                    weight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AdminTheme.body(15, color: AdminColors.textPrimary, weight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _userSubtitle(user),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AdminTheme.body(12, color: AdminColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              StatusBadge(
+                premium ? _remainingLabel(user) : 'Bure',
+                color: premium ? AdminColors.green : AdminColors.info,
+              ),
+            ],
           ),
-      ],
-      actions: [
-        _AccessBtn(user: user),
-        IconButton(
-          tooltip: 'Hariri',
-          onPressed: () => openUserEditor(context, isNew: false, user: user),
-          icon: const Icon(Icons.edit_rounded, color: AdminColors.textSecondary, size: 20),
-        ),
-        DeleteIconButton(
-          onDelete: () => deleteWithConfirm(
-            context,
-            dialogTitle: 'Futa mtumiaji',
-            itemName: user['name'] as String? ?? '',
-            onDelete: () => context.read<AdminState>().removeUser(user['id'] as String),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (!_isRegistered(user))
+                const StatusBadge('App pekee', color: AdminColors.info),
+              if (phone.isNotEmpty)
+                _CopyChip(
+                  icon: Icons.phone_rounded,
+                  label: phone,
+                  copyValue: phone,
+                ),
+              if (deviceId.isNotEmpty)
+                _CopyChip(
+                  icon: Icons.fingerprint_rounded,
+                  label: deviceId.length > 12 ? 'FP …${deviceId.substring(deviceId.length - 8)}' : 'FP $deviceId',
+                  copyValue: deviceId,
+                ),
+              if (expiryAt != null)
+                StatusBadge(
+                  'Mwisho ${dateFmt.format(expiryAt)}',
+                  color: AdminColors.textSecondary,
+                ),
+            ],
           ),
-        ),
-      ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _UserActionBtn(
+                  label: 'Ufikiaji',
+                  icon: premium ? Icons.verified_rounded : Icons.vpn_key_rounded,
+                  color: premium ? AdminColors.green : AdminColors.info,
+                  onTap: () => _AccessSheet.show(context, user),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _UserActionBtn(
+                  label: 'Hariri',
+                  icon: Icons.edit_rounded,
+                  color: AdminColors.textSecondary,
+                  onTap: () => openUserEditor(context, isNew: false, user: user),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Futa',
+                onPressed: () => deleteWithConfirm(
+                  context,
+                  dialogTitle: 'Futa mtumiaji',
+                  itemName: name,
+                  onDelete: () => context.read<AdminState>().removeUser(user['id'] as String),
+                ),
+                style: IconButton.styleFrom(
+                  backgroundColor: AdminColors.danger.withValues(alpha: 0.12),
+                  foregroundColor: AdminColors.danger,
+                ),
+                icon: const Icon(Icons.delete_outline_rounded, size: 20),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _AccessBtn extends StatelessWidget {
-  const _AccessBtn({required this.user});
+class _CopyChip extends StatelessWidget {
+  const _CopyChip({
+    required this.icon,
+    required this.label,
+    required this.copyValue,
+  });
 
-  final Map<String, dynamic> user;
+  final IconData icon;
+  final String label;
+  final String copyValue;
 
   @override
   Widget build(BuildContext context) {
-    final active = _hasPremium(user);
-    final color = active ? AdminColors.green : AdminColors.info;
     return Material(
-      color: color.withValues(alpha: 0.15),
-      borderRadius: BorderRadius.circular(10),
+      color: AdminColors.bg.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
-        onTap: () => _AccessSheet.show(context, user),
-        borderRadius: BorderRadius.circular(10),
+        onTap: () async {
+          await Clipboard.setData(ClipboardData(text: copyValue));
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Imenakiliwa: $copyValue'),
+              backgroundColor: AdminColors.green,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(8),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                active ? Icons.verified_rounded : Icons.vpn_key_rounded,
-                color: color,
-                size: 18,
-              ),
+              Icon(icon, size: 13, color: AdminColors.textSecondary),
+              const SizedBox(width: 5),
+              Text(label, style: AdminTheme.body(11, color: AdminColors.textSecondary, weight: FontWeight.w700)),
               const SizedBox(width: 4),
-              Text(
-                'Ufikiaji',
-                style: AdminTheme.body(11, color: color, weight: FontWeight.w800),
-              ),
+              Icon(Icons.copy_rounded, size: 11, color: AdminColors.textHint),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UserActionBtn extends StatelessWidget {
+  const _UserActionBtn({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color.withValues(alpha: 0.14),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 18),
+              const SizedBox(width: 6),
+              Text(label, style: AdminTheme.body(12, color: color, weight: FontWeight.w800)),
             ],
           ),
         ),

@@ -39,7 +39,7 @@ class PaymentVoiceService {
         byteData.lengthInBytes,
       );
 
-      final isStale = () => token != _playGeneration;
+      bool isStale() => token != _playGeneration;
 
       if (!kIsWeb && isLinuxPlatform) {
         await playVoiceFromTempFile(

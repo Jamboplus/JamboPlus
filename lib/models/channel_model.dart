@@ -12,6 +12,7 @@ class ChannelModel {
     this.drmType = 'none',
     this.drmLicenseUrl = '',
     this.drmClearKey = '',
+    this.watchCount = 0,
   });
 
   final String id;
@@ -26,6 +27,7 @@ class ChannelModel {
   final String drmType;
   final String drmLicenseUrl;
   final String drmClearKey;
+  final int watchCount;
 
   factory ChannelModel.fromJson(Map<String, dynamic> json) {
     return ChannelModel(
@@ -41,6 +43,7 @@ class ChannelModel {
       drmType: json['drmType'] as String? ?? 'none',
       drmLicenseUrl: json['drmLicenseUrl'] as String? ?? '',
       drmClearKey: json['drmClearKey'] as String? ?? '',
+      watchCount: (json['watchCount'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -57,6 +60,7 @@ class ChannelModel {
         'drmType': drmType,
         'drmLicenseUrl': drmLicenseUrl,
         'drmClearKey': drmClearKey,
+        'watchCount': watchCount,
       };
 
   ChannelModel copyWith({
@@ -72,6 +76,7 @@ class ChannelModel {
     String? drmType,
     String? drmLicenseUrl,
     String? drmClearKey,
+    int? watchCount,
   }) {
     return ChannelModel(
       id: id ?? this.id,
@@ -86,6 +91,7 @@ class ChannelModel {
       drmType: drmType ?? this.drmType,
       drmLicenseUrl: drmLicenseUrl ?? this.drmLicenseUrl,
       drmClearKey: drmClearKey ?? this.drmClearKey,
+      watchCount: watchCount ?? this.watchCount,
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/theme/app_colors.dart';
 import 'package:jamboplus/providers/user_provider.dart';
@@ -207,13 +208,58 @@ class ScrollAwareHowToPayScope extends ConsumerStatefulWidget {
 class _ScrollAwareHowToPayScopeState
     extends ConsumerState<ScrollAwareHowToPayScope> {
   bool _scrolled = false;
+  bool _draggingDown = false;
+
+  void _setScrolled(bool value) {
+    if (_scrolled == value || !mounted) return;
+    setState(() => _scrolled = value);
+  }
 
   bool _onScroll(ScrollNotification n) {
+    // Only the nearest vertical scrollable under this listener.
+    // Nested (e.g. carousel PageView) must not hide/show the FAB.
+    if (n.depth != 0) return false;
     if (n.metrics.axis != Axis.vertical) return false;
-    final show = n.metrics.pixels > 48;
-    if (show != _scrolled) {
-      setState(() => _scrolled = show);
+
+    final pixels = n.metrics.pixels;
+    final maxExtent = n.metrics.maxScrollExtent;
+
+    if (n is UserScrollNotification) {
+      if (n.direction == ScrollDirection.forward) {
+        _draggingDown = true;
+        _setScrolled(true);
+      } else if (n.direction == ScrollDirection.reverse) {
+        _draggingDown = false;
+      } else if (n.direction == ScrollDirection.idle) {
+        _draggingDown = false;
+        // Settle only after the gesture ends — avoids hide flicker at pixels≈0.
+        _setScrolled(pixels > 8 || (maxExtent <= 32 && _scrolled));
+      }
+      return false;
     }
+
+    if (n is ScrollUpdateNotification) {
+      if (_draggingDown || pixels > 8) {
+        _setScrolled(true);
+      } else if (pixels <= 4) {
+        _setScrolled(false);
+      }
+      return false;
+    }
+
+    if (n is ScrollEndNotification) {
+      _draggingDown = false;
+      _setScrolled(pixels > 8);
+      return false;
+    }
+
+    // Short lists — reveal on downward overscroll tug.
+    if (n is OverscrollNotification &&
+        n.overscroll > 0 &&
+        maxExtent <= 32) {
+      _setScrolled(true);
+    }
+
     return false;
   }
 

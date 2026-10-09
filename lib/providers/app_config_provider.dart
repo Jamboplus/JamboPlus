@@ -1,16 +1,25 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:jamboplus/core/constants/app_constants.dart';
 import 'package:jamboplus/models/app_config_model.dart';
 import 'package:jamboplus/models/pricing_model.dart';
+import 'package:jamboplus/providers/cache_first.dart';
 import 'package:jamboplus/providers/carousel_provider.dart';
 import 'package:jamboplus/providers/channel_provider.dart';
 import 'package:jamboplus/providers/service_providers.dart';
 import 'package:jamboplus/providers/user_provider.dart';
-import 'package:jamboplus/services/push_notification_service.dart';
 
 final bootstrapProvider = FutureProvider<BootstrapModel>((ref) async {
-  return ref.read(apiServiceProvider).fetchBootstrap();
+  final api = ref.read(apiServiceProvider);
+  final storage = ref.read(storageServiceProvider);
+  return cacheFirstThenRefresh<BootstrapModel>(
+    ref: ref,
+    loadCache: storage.loadBootstrapCache,
+    fetchRemote: api.fetchBootstrap,
+    saveCache: storage.saveBootstrapCache,
+    isUsable: (_) => true,
+    didChange: (cached, remote) =>
+        cached.maintenanceMode != remote.maintenanceMode ||
+        cached.config.toJson().toString() != remote.config.toJson().toString(),
+  );
 });
 
 final appConfigProvider = Provider<AppConfigModel?>((ref) {
@@ -18,10 +27,19 @@ final appConfigProvider = Provider<AppConfigModel?>((ref) {
 });
 
 final pricingProvider = FutureProvider<List<PricingPlanModel>>((ref) async {
-  return ref.read(apiServiceProvider).fetchPricing();
+  final api = ref.read(apiServiceProvider);
+  final storage = ref.read(storageServiceProvider);
+  return cacheFirstThenRefresh<List<PricingPlanModel>>(
+    ref: ref,
+    loadCache: storage.loadPricingCache,
+    fetchRemote: api.fetchPricing,
+    saveCache: storage.savePricingCache,
+    isUsable: (v) => v.isNotEmpty,
+    didChange: (a, b) => listJsonChanged(a, b, (p) => p.toJson()),
+  );
 });
 
-/// Preloads channels, carousel, pricing, player config, and syncs subscription.
+/// Preloads content fast (cache-first). Subscription sync runs in background.
 final remoteContentProvider = FutureProvider<void>((ref) async {
   await Future.wait([
     ref.watch(bootstrapProvider.future),
@@ -30,32 +48,9 @@ final remoteContentProvider = FutureProvider<void>((ref) async {
     ref.watch(pricingProvider.future),
   ]);
 
-  final storage = ref.read(storageServiceProvider);
-  final api = ref.read(apiServiceProvider);
-  final idAndToken = await Future.wait<String?>([
-    storage.getOrCreateDeviceId(),
-    PushNotificationService.currentToken(),
-  ]);
-  final deviceId = idAndToken[0]!;
-  final fcmToken = idAndToken[1];
-  try {
-    final heartbeatUser = await api.sendDeviceHeartbeat(
-      deviceId: deviceId,
-      fcmToken: fcmToken,
-      platform: defaultTargetPlatform.name,
-      appVersion: AppConstants.appVersion,
-    );
-    await ref.read(userProvider.notifier).seedFromDevice(heartbeatUser);
-  } catch (_) {
-    // Offline — keep cache; still try a light subscription sync.
-    await ref.read(userProvider.notifier).syncFromServer();
-  }
-
-  final user = ref.read(userProvider);
+  // Do not block opening on heartbeat / FCM — MainShell live-sync covers it.
   // ignore: unawaited_futures
-  PushNotificationService.syncAudienceTopics(
-    isPremium: user.hasActiveSubscription,
-  );
+  ref.read(userProvider.notifier).refresh(heartbeat: true);
 });
 
 /// Hard invalidate used by the gate retry button (may remount shell).
@@ -81,6 +76,14 @@ Future<void> softRefreshRemoteContent(WidgetRef ref) async {
     ref.read(channelsProvider.future),
     ref.read(carouselProvider.future),
     ref.read(pricingProvider.future),
-    ref.read(userProvider.notifier).refresh(),
+    ref.read(userProvider.notifier).refresh(heartbeat: true),
   ]);
+}
+
+/// Lightweight live tick used while the app stays open.
+Future<void> liveSyncTick(WidgetRef ref, {bool fullContent = false}) async {
+  await ref.read(userProvider.notifier).refresh(heartbeat: true);
+  if (fullContent) {
+    await softRefreshRemoteContent(ref);
+  }
 }

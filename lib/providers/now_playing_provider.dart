@@ -3,6 +3,7 @@ import 'package:jamboplus/models/channel_model.dart';
 import 'package:jamboplus/models/playback_source.dart';
 import 'package:jamboplus/models/user_model.dart';
 import 'package:jamboplus/providers/user_provider.dart';
+import 'package:jamboplus/providers/service_providers.dart';
 
 final nowPlayingProvider =
     StateNotifierProvider<NowPlayingNotifier, PlaybackSource?>((ref) {
@@ -21,6 +22,7 @@ class NowPlayingNotifier extends StateNotifier<PlaybackSource?> {
     final user = _ref.read(userProvider);
     if (channel.isPremium && !user.hasActiveSubscription) return false;
     state = PlaybackSource.fromChannel(channel);
+    _ref.read(apiServiceProvider).recordChannelWatch(channel.id);
     return true;
   }
 

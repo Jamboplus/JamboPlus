@@ -16,7 +16,11 @@ dependencies:
   fl_chart: ^0.70.2
   intl: ^0.20.2
   shared_preferences: ^2.3.4
+  shared_preferences_linux: ^2.4.1
+  shared_preferences_windows: ^2.4.1
   path_provider: ^2.1.5
+  path_provider_linux: ^2.2.2
+  path_provider_windows: ^2.3.0
 
 dev_dependencies:
   flutter_test:

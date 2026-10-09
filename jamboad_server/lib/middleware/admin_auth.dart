@@ -18,7 +18,7 @@ Middleware adminAuth(Env env) {
       }
       try {
         final claims = verifyAdminToken(env, token);
-        return inner(request.change(context: {'admin': claims}));
+        return await inner(request.change(context: {'admin': claims}));
       } catch (_) {
         return errorResponse(401, 'Invalid or expired token');
       }

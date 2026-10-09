@@ -271,7 +271,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
           widget.controller._web = controller;
           _bindHandlers(controller);
         },
-        onLoadStart: (_, __) {
+        onLoadStart: (_, _) {
           _onState(playing: false, buffering: true);
         },
         onLoadStop: (controller, loadedUrl) async {
@@ -554,7 +554,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
     } catch (_) {}
   }
 
-  function applyShakaQuality(value) {
+  function applyShakaQuality(value, clearBuffer) {
     var player = getShaka();
     if (!player) return false;
     try {
@@ -568,7 +568,9 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       var chosen = pickClosest(tracks, target);
       if (!chosen) return false;
       player.configure({ abr: { enabled: false, restrictions: { maxHeight: 2160 } } });
-      try { player.selectVariantTrack(chosen, true); }
+      // Keep the current decoded frame while switching tracks. Clearing the
+      // buffer here causes colored flashes and line artifacts on Android WebView.
+      try { player.selectVariantTrack(chosen, false); }
       catch (_) { try { player.selectVariantTrack(chosen, false); } catch (__) {} }
       emitTracks(trackHeight(chosen) + 'p');
       return true;
@@ -587,7 +589,9 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
         var d = Math.abs((lvl.height || 0) - target);
         if (d < bestDiff) { bestDiff = d; best = i; }
       });
-      window.hls.currentLevel = best;
+      // Ask HLS to move on the next segment instead of flushing the current
+      // frame, which avoids a visible flash during a quality switch.
+      window.hls.nextLevel = best;
       var h = window.hls.levels[best] && window.hls.levels[best].height;
       emitTracks((h || target) + 'p');
       return true;
@@ -644,7 +648,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       if (applyHlsQuality(value)) return;
       // Retry shortly — embed Shaka may not be ready on first tap.
       setTimeout(function () {
-        if (!applyShakaQuality(value)) applyHlsQuality(value);
+        if (!applyShakaQuality(value, true)) applyHlsQuality(value);
       }, 400);
     },
     setLanguage: function (value) {
@@ -673,7 +677,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
     waits++;
     if (getShaka() || waits > 40) {
       clearInterval(readyTimer);
-      applyShakaQuality('360p');
+      applyShakaQuality('360p', false);
       applyLanguage('sw');
       emitTracks('360p', 'sw');
     }
@@ -803,7 +807,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
         try { await video.play(); } catch (__) {}
       }
     }
-    function applyQuality(value) {
+    function applyQuality(value, clearBuffer) {
       if (!player) return false;
       preferredQuality = value || '360p';
       if (preferredQuality === 'Auto') {
@@ -819,7 +823,8 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       const chosen = pickClosestTrack(pool, target);
       if (!chosen) return false;
       try {
-        player.selectVariantTrack(chosen, /* clearBuffer */ true);
+        // Do not clear the active buffer during a user quality change.
+        player.selectVariantTrack(chosen, false);
       } catch (_) {
         try { player.selectVariantTrack(chosen, false); } catch (__) { return false; }
       }
@@ -830,7 +835,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       if (!player) return;
       preferredLang = (value === 'en') ? 'en' : 'sw';
       try { player.selectAudioLanguage(preferredLang); } catch (_) {}
-      applyQuality(preferredQuality);
+      applyQuality(preferredQuality, false);
     }
 
     window.leotenaPlayer = {
@@ -840,7 +845,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
         if (Number.isFinite(value) && Number.isFinite(video.duration)) video.currentTime = value;
       },
       setQuality: value => {
-        applyQuality(value);
+        applyQuality(value, true);
         setTimeout(emitTracks, 150);
       },
       setLanguage: value => {
@@ -897,8 +902,8 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
           preferredTextLanguage: 'sw',
           streaming: {
             // Slightly deeper buffer = fewer scratches on unstable mobile nets.
-            rebufferingGoal: 2.5,
-            bufferingGoal: 12,
+            rebufferingGoal: 1.5,
+            bufferingGoal: 8,
             bufferBehind: 20,
             stallEnabled: true,
             retryParameters: { maxAttempts: 4, baseDelay: 250, backoffFactor: 1.6, timeout: 15000 }
@@ -911,7 +916,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
         await player.load($sourceJson);
         started = true;
         applyLanguage('sw');
-        applyQuality('360p');
+        applyQuality('360p', false);
         // Allow picking higher ladders after the 360p start stick.
         try { player.configure({ abr: { restrictions: { maxHeight: 1080 } } }); } catch (_) {}
         emitTracks();

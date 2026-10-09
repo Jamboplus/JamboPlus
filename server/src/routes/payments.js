@@ -198,9 +198,63 @@ function extractWebhookPaid(payload) {
   return { orderId, paid, rawStatus, event: ev };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function createPaymentRoutes(db) {
   const router = express.Router();
   const signed = appSignatureMiddleware(db);
+  /** One background checker per order so the app poll never waits on SonicPesa. */
+  const watchers = new Map();
+
+  function watchPayment(orderId) {
+    if (!orderId || watchers.has(orderId)) return;
+    watchers.set(orderId, true);
+
+    const run = (async () => {
+      const deadline = Date.now() + 95_000;
+      while (Date.now() < deadline) {
+        try {
+          const tx = db
+            .prepare('SELECT * FROM payment_transactions WHERE order_id = ?')
+            .get(orderId);
+          if (!tx || tx.status !== 'pending') return;
+          if (!sonicpesaConfigured()) return;
+
+          const remote = await sonicpesaOrderStatus(orderId);
+          if (!remote.ok) {
+            await sleep(1200);
+            continue;
+          }
+
+          const paymentStatus = normalizePaymentStatus(
+            remote.payment_status || remote.status,
+          );
+          const current = db
+            .prepare('SELECT * FROM payment_transactions WHERE order_id = ?')
+            .get(orderId);
+          if (!current || current.status !== 'pending') return;
+
+          if (isSonicpesaSuccess(paymentStatus)) {
+            grantPremiumFromPayment(db, current);
+            return;
+          }
+          if (isSonicpesaFailure(paymentStatus)) {
+            markPaymentFailed(db, orderId);
+            return;
+          }
+        } catch (err) {
+          console.error('[payments/watch]', orderId, err);
+        }
+        await sleep(1200);
+      }
+    })().finally(() => {
+      if (watchers.get(orderId) === run) watchers.delete(orderId);
+    });
+
+    watchers.set(orderId, run);
+  }
 
   router.get('/payments/health', signed, (_req, res) => {
     res.json({
@@ -260,6 +314,7 @@ function createPaymentRoutes(db) {
       const user = ensureUser(db, { name, phone: phoneDigits, deviceId });
 
       const emailBase = phoneDigits.replace(/\D/g, '').slice(-9) || 'user';
+      const startedAt = Date.now();
       const order = await sonicpesaCreateOrder({
         buyer_email: `${emailBase}@jamboplus.app`,
         buyer_name: name,
@@ -267,6 +322,11 @@ function createPaymentRoutes(db) {
         amount,
         currency: 'TZS',
       });
+      console.log(
+        '[SonicPesa] create_order',
+        order.ok ? 'ok' : 'fail',
+        `${Date.now() - startedAt}ms`,
+      );
 
       if (!order.ok || !order.order_id) {
         console.warn('[SonicPesa] create_order failed:', order.error);
@@ -297,6 +357,33 @@ function createPaymentRoutes(db) {
         now,
       );
 
+      if (isSonicpesaSuccess(order.payment_status)) {
+        const paidTx = db
+          .prepare('SELECT * FROM payment_transactions WHERE order_id = ?')
+          .get(order.order_id);
+        const paidUser = grantPremiumFromPayment(db, paidTx);
+        return res.status(201).json({
+          ok: true,
+          status: 'completed',
+          orderId: order.order_id,
+          order_id: order.order_id,
+          amount,
+          currency: 'TZS',
+          planId: plan.id,
+          provider: 'sonicpesa',
+          message: 'Malipo yamekamilika. Premium imewashwa.',
+          paymentStatus: 'SUCCESS',
+          completed: true,
+          failed: false,
+          pending: false,
+          activated: true,
+          user: userToJson(paidUser),
+        });
+      }
+
+      // Confirm success/failure off the request path so the phone prompt is not delayed.
+      watchPayment(order.order_id);
+
       return res.status(201).json({
         ok: true,
         status: 'pending',
@@ -309,6 +396,10 @@ function createPaymentRoutes(db) {
         message:
           'Angalia simu yako — weka PIN ya M-Pesa / Tigo / Airtel / HaloPesa kukamilisha malipo.',
         paymentStatus: order.payment_status || 'PENDING',
+        completed: false,
+        failed: false,
+        pending: true,
+        activated: false,
       });
     } catch (err) {
       console.error('[payments/start]', err);
@@ -349,58 +440,15 @@ function createPaymentRoutes(db) {
           failed: true,
           pending: false,
           activated: false,
-        });
-      }
-
-      if (!sonicpesaConfigured()) {
-        return res.json({
-          ok: true,
-          paymentStatus: 'PENDING',
-          completed: false,
-          failed: false,
-          pending: true,
-          activated: false,
-        });
-      }
-
-      const remote = await sonicpesaOrderStatus(orderId);
-      if (!remote.ok) {
-        return res.status(502).json({
-          error: 'Imeshindikana kuangalia hali ya malipo. Jaribu tena.',
-        });
-      }
-
-      const paymentStatus = normalizePaymentStatus(remote.payment_status || remote.status);
-
-      if (isSonicpesaSuccess(paymentStatus)) {
-        const user = grantPremiumFromPayment(db, tx);
-        return res.json({
-          ok: true,
-          paymentStatus,
-          completed: true,
-          failed: false,
-          pending: false,
-          activated: true,
-          user: userToJson(user),
-        });
-      }
-
-      if (isSonicpesaFailure(paymentStatus)) {
-        markPaymentFailed(db, orderId);
-        return res.json({
-          ok: true,
-          paymentStatus,
-          completed: false,
-          failed: true,
-          pending: false,
-          activated: false,
           message: 'Malipo hayajakamilika. Jaribu tena.',
         });
       }
 
+      // Local read only. The watcher (or webhook) flips the row when Sonic reports.
+      watchPayment(orderId);
       return res.json({
         ok: true,
-        paymentStatus: paymentStatus || 'PENDING',
+        paymentStatus: 'PENDING',
         completed: false,
         failed: false,
         pending: true,

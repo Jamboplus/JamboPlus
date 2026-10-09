@@ -99,7 +99,16 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS payment_transactions_status_idx ON payment_transactions(status);
   `);
   migrateUserDeviceColumns(db);
+  migrateChannelWatchColumns(db);
   migrateAppConfigSupportColumns(db);
+}
+
+function migrateChannelWatchColumns(db) {
+  const cols = db.prepare('PRAGMA table_info(channels)').all().map((c) => c.name);
+  if (!cols.includes('watch_count')) {
+    db.exec('ALTER TABLE channels ADD COLUMN watch_count INTEGER NOT NULL DEFAULT 0');
+  }
+  db.prepare("UPDATE channels SET category = 'Trending' WHERE category = 'Wanyama'").run();
 }
 
 function migrateUserDeviceColumns(db) {
@@ -209,10 +218,10 @@ function seedIfEmpty(db) {
     ['k2', 'Kids Zone', 'https://picsum.photos/seed/kat2/400/300', 'Katuni', 'Burudani kwa watoto', 1, 0, ''],
     ['k3', 'Anime Swahili', 'https://picsum.photos/seed/kat3/400/300', 'Katuni', 'Anime kwa Kiswahili', 1, 1, ''],
     ['k4', 'Funny Toons', 'https://picsum.photos/seed/kat4/400/300', 'Katuni', 'Katuni za kuchekesha', 0, 0, ''],
-    ['w1', 'Safari Live', 'https://picsum.photos/seed/wan1/400/300', 'Wanyama', 'Maisha ya wanyama porini', 1, 1, ''],
-    ['w2', 'Ocean World', 'https://picsum.photos/seed/wan2/400/300', 'Wanyama', 'Maisha ya baharini', 1, 0, ''],
-    ['w3', 'Bird Paradise', 'https://picsum.photos/seed/wan3/400/300', 'Wanyama', 'Ndege wa duniani', 0, 1, ''],
-    ['w4', 'Wild Africa', 'https://picsum.photos/seed/wan4/400/300', 'Wanyama', 'Wanyama wa Afrika', 1, 0, ''],
+    ['w1', 'Safari Live', 'https://picsum.photos/seed/wan1/400/300', 'Trending', 'Maisha ya wanyama porini', 1, 1, ''],
+    ['w2', 'Ocean World', 'https://picsum.photos/seed/wan2/400/300', 'Trending', 'Maisha ya baharini', 1, 0, ''],
+    ['w3', 'Bird Paradise', 'https://picsum.photos/seed/wan3/400/300', 'Trending', 'Ndege wa duniani', 0, 1, ''],
+    ['w4', 'Wild Africa', 'https://picsum.photos/seed/wan4/400/300', 'Trending', 'Wanyama wa Afrika', 1, 0, ''],
   ];
   const insertChannel = db.prepare(`
     INSERT INTO channels (

@@ -24,7 +24,7 @@ class _HomeCarouselState extends ConsumerState<HomeCarousel> {
 
     return carouselAsync.when(
       loading: () => _buildPlaceholder(),
-      error: (_, __) => _buildPlaceholder(),
+      error: (_, _) => _buildPlaceholder(),
       data: (items) => _buildCarousel(items),
     );
   }
@@ -76,10 +76,10 @@ class _HomeCarouselState extends ConsumerState<HomeCarousel> {
                     CachedNetworkImage(
                       imageUrl: item.image,
                       fit: BoxFit.cover,
-                      placeholder: (_, __) => Container(
+                      placeholder: (_, _) => Container(
                         color: AppColors.primaryIndigo.withValues(alpha: 0.2),
                       ),
-                      errorWidget: (_, __, ___) => Container(
+                      errorWidget: (_, _, _) => Container(
                         decoration: const BoxDecoration(
                           gradient: AppColors.primaryGradient,
                         ),

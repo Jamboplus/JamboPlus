@@ -377,16 +377,207 @@ class AdminState extends ChangeNotifier {
     }
   }
 
-  Future<void> grantPremium(String id, int amount, String unit) async {
-    final updated = await _api.setUserPremium({
-      'action': 'grant',
-      'userId': id,
-      'amount': amount,
-      'unit': unit,
+  static Set<String> _phoneKeys(String raw) {
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return {};
+    final keys = <String>{digits};
+    if (digits.startsWith('255') && digits.length == 12) {
+      keys.add('0${digits.substring(3)}');
+      keys.add(digits.substring(3));
+    } else if (digits.startsWith('0') && digits.length == 10) {
+      keys.add('255${digits.substring(1)}');
+      keys.add(digits.substring(1));
+    } else if (digits.length == 9 && RegExp(r'^[67]').hasMatch(digits)) {
+      keys.add('0$digits');
+      keys.add('255$digits');
+    }
+    return keys.where((k) => k.length >= 9).toSet();
+  }
+
+  Map<String, dynamic>? _findLocalUser(String raw) {
+    final q = raw.trim();
+    if (q.isEmpty) return null;
+    final qLower = q.toLowerCase();
+    final phoneKeys = _phoneKeys(q);
+
+    for (final u in _users) {
+      final id = (u['id'] as String? ?? '').trim();
+      final deviceId = (u['deviceId'] as String? ?? '').trim();
+      final phone = (u['phone'] as String? ?? '').trim();
+      if (id.isNotEmpty && id.toLowerCase() == qLower) return u;
+      if (deviceId.isNotEmpty && deviceId.toLowerCase() == qLower) return u;
+      if (phoneKeys.isNotEmpty &&
+          _phoneKeys(phone).intersection(phoneKeys).isNotEmpty) {
+        return u;
+      }
+    }
+    return null;
+  }
+
+  Duration _premiumDuration(int amount, String unit) {
+    final n = amount < 1 ? 1 : amount;
+    switch (unit) {
+      case 'minutes':
+        return Duration(minutes: n);
+      case 'hours':
+        return Duration(hours: n);
+      case 'weeks':
+        return Duration(days: n * 7);
+      default:
+        return Duration(days: n);
+    }
+  }
+
+  String _computeExpiryIso(Map<String, dynamic>? user, int amount, String unit) {
+    final now = DateTime.now().toUtc();
+    var base = now;
+    if (user != null &&
+        user['packageType'] == 'premium' &&
+        user['expiryDate'] is String) {
+      final existing = parseAdminDate(user['expiryDate'] as String)?.toUtc();
+      if (existing != null && existing.isAfter(now)) base = existing;
+    }
+    return base.add(_premiumDuration(amount, unit)).toIso8601String();
+  }
+
+  /// Production Railway was missing POST /users/premium — PUT always works.
+  Future<Map<String, dynamic>> _grantViaUpdate(
+    String userId,
+    int amount,
+    String unit,
+  ) async {
+    Map<String, dynamic>? existing;
+    for (final u in _users) {
+      if (u['id'] == userId) {
+        existing = u;
+        break;
+      }
+    }
+    final updated = await _api.updateUser(userId, {
+      'packageType': 'premium',
+      'expiryDate': _computeExpiryIso(existing, amount, unit),
     });
     _upsertUserLocal(updated);
     _refreshDashboardSoon();
     notifyListeners();
+    return updated;
+  }
+
+  Future<Map<String, dynamic>> _revokeViaUpdate(String userId) async {
+    final updated = await _api.updateUser(userId, {
+      'packageType': 'free',
+      'expiryDate': null,
+    });
+    _upsertUserLocal(updated);
+    _refreshDashboardSoon();
+    notifyListeners();
+    return updated;
+  }
+
+  bool _isMissingRoute(ApiException e) {
+    if (e.statusCode == 404) return true;
+    final msg = e.message.trim().toLowerCase();
+    return msg == 'not found' || msg.contains('cannot post');
+  }
+
+  Future<Map<String, dynamic>> _grantWithPremiumOrPut(
+    Map<String, dynamic> premiumBody,
+    String? fallbackUserId,
+    int amount,
+    String unit,
+  ) async {
+    final id = fallbackUserId?.trim();
+
+    // 1) Path-based access (present after server redeploy).
+    if (id != null && id.isNotEmpty) {
+      try {
+        final updated = await _api.setUserAccess(id, {
+          'action': 'grant',
+          'amount': amount,
+          'unit': unit,
+        });
+        _upsertUserLocal(updated);
+        _refreshDashboardSoon();
+        notifyListeners();
+        return updated;
+      } on ApiException catch (e) {
+        if (!_isMissingRoute(e)) rethrow;
+      }
+    }
+
+    // 2) Body-based premium endpoint.
+    try {
+      final updated = await _api.setUserPremium(premiumBody);
+      _upsertUserLocal(updated);
+      _refreshDashboardSoon();
+      notifyListeners();
+      return updated;
+    } on ApiException catch (e) {
+      // Old production build has no /users/premium (generic "Not found").
+      if (!_isMissingRoute(e)) rethrow;
+    }
+
+    // 3) PUT update — works on current Railway production today.
+    if (id == null || id.isEmpty) {
+      throw ApiException(
+        'Mtumiaji hajapatikana. Tumia Fingerprint ID, simu, au ID.',
+        statusCode: 404,
+      );
+    }
+    return _grantViaUpdate(id, amount, unit);
+  }
+
+  Future<Map<String, dynamic>> _revokeWithPremiumOrPut(
+    Map<String, dynamic> premiumBody,
+    String? fallbackUserId,
+  ) async {
+    final id = fallbackUserId?.trim();
+
+    if (id != null && id.isNotEmpty) {
+      try {
+        final updated = await _api.setUserAccess(id, {
+          'action': 'revoke',
+        });
+        _upsertUserLocal(updated);
+        _refreshDashboardSoon();
+        notifyListeners();
+        return updated;
+      } on ApiException catch (e) {
+        if (!_isMissingRoute(e)) rethrow;
+      }
+    }
+
+    try {
+      final updated = await _api.setUserPremium(premiumBody);
+      _upsertUserLocal(updated);
+      _refreshDashboardSoon();
+      notifyListeners();
+      return updated;
+    } on ApiException catch (e) {
+      if (!_isMissingRoute(e)) rethrow;
+    }
+
+    if (id == null || id.isEmpty) {
+      throw ApiException(
+        'Mtumiaji hajapatikana. Tumia Fingerprint ID, simu, au ID.',
+        statusCode: 404,
+      );
+    }
+    return _revokeViaUpdate(id);
+  }
+
+  Future<void> grantPremium(String id, int amount, String unit) async {
+    await _grantWithPremiumOrPut(
+      {
+        'action': 'grant',
+        'userId': id,
+        'amount': amount,
+        'unit': unit,
+      },
+      id,
+      amount,
+      unit,
+    );
   }
 
   /// Upgrade / extend premium using fingerprint ID, phone, or user UUID.
@@ -396,16 +587,29 @@ class AdminState extends ChangeNotifier {
     String unit,
   ) async {
     final raw = identifier.trim();
-    final updated = await _api.setUserPremium({
-      'action': 'grant',
-      'identifier': raw,
-      'amount': amount,
-      'unit': unit,
-    });
-    _upsertUserLocal(updated);
-    _refreshDashboardSoon();
-    notifyListeners();
-    return updated;
+    var local = _findLocalUser(raw);
+    if (local == null) {
+      // List may be stale — refresh once then resolve again.
+      try {
+        final fresh = await _api.listUsers();
+        _users = fresh.cast<Map<String, dynamic>>();
+        local = _findLocalUser(raw);
+      } catch (_) {}
+    }
+    return _grantWithPremiumOrPut(
+      {
+        'action': 'grant',
+        'identifier': raw,
+        if (local?['id'] != null) 'userId': local!['id'],
+        'phone': raw,
+        'deviceId': raw,
+        'amount': amount,
+        'unit': unit,
+      },
+      local?['id'] as String?,
+      amount,
+      unit,
+    );
   }
 
   /// Upgrade / extend premium using the user's unique device id from Mtumiaji.
@@ -426,25 +630,35 @@ class AdminState extends ChangeNotifier {
   }
 
   Future<void> revokePremium(String id) async {
-    final updated = await _api.setUserPremium({
-      'action': 'revoke',
-      'userId': id,
-    });
-    _upsertUserLocal(updated);
-    _refreshDashboardSoon();
-    notifyListeners();
+    await _revokeWithPremiumOrPut(
+      {
+        'action': 'revoke',
+        'userId': id,
+      },
+      id,
+    );
   }
 
   Future<Map<String, dynamic>> revokePremiumByIdentifier(String identifier) async {
     final raw = identifier.trim();
-    final updated = await _api.setUserPremium({
-      'action': 'revoke',
-      'identifier': raw,
-    });
-    _upsertUserLocal(updated);
-    _refreshDashboardSoon();
-    notifyListeners();
-    return updated;
+    var local = _findLocalUser(raw);
+    if (local == null) {
+      try {
+        final fresh = await _api.listUsers();
+        _users = fresh.cast<Map<String, dynamic>>();
+        local = _findLocalUser(raw);
+      } catch (_) {}
+    }
+    return _revokeWithPremiumOrPut(
+      {
+        'action': 'revoke',
+        'identifier': raw,
+        if (local?['id'] != null) 'userId': local!['id'],
+        'phone': raw,
+        'deviceId': raw,
+      },
+      local?['id'] as String?,
+    );
   }
 
   Future<Map<String, dynamic>> revokePremiumByDeviceId(String deviceId) async {

@@ -43,6 +43,21 @@ class AppConfigModel {
       supportHours: json['supportHours'] as String? ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'playerEngine': playerEngine,
+        'drmType': drmType,
+        'streamOrigin': streamOrigin,
+        'streamReferer': streamReferer,
+        'userAgent': userAgent,
+        'tokenRefreshUrl': tokenRefreshUrl,
+        'streamUserId': streamUserId,
+        'appApiKey': appApiKey,
+        'maintenanceMode': maintenanceMode,
+        'whatsappNumber': whatsappNumber,
+        'whatsappMessage': whatsappMessage,
+        'supportHours': supportHours,
+      };
 }
 
 class BootstrapModel {
@@ -62,4 +77,9 @@ class BootstrapModel {
       maintenanceMode: json['maintenanceMode'] as bool? ?? false,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'config': config.toJson(),
+        'maintenanceMode': maintenanceMode,
+      };
 }

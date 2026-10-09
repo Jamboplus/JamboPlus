@@ -132,7 +132,7 @@ class PushNotificationService {
   static Future<String?> currentToken() async {
     if (!_firebaseReady) return null;
     try {
-      return FirebaseMessaging.instance.getToken();
+      return await FirebaseMessaging.instance.getToken();
     } catch (_) {
       return null;
     }

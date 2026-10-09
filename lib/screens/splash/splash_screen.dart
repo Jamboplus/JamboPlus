@@ -14,7 +14,7 @@ class SplashScreen extends ConsumerStatefulWidget {
 }
 
 class _SplashScreenState extends ConsumerState<SplashScreen> {
-  static const _minSplash = Duration(milliseconds: 900);
+  static const _minSplash = Duration(milliseconds: 450);
 
   @override
   void initState() {
@@ -33,12 +33,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   }
 
   Future<void> _warmupAndGo() async {
-    // Prefetch while the splash animates so AppGate rarely blocks.
-    final warmup = ref.read(remoteContentProvider.future);
-    await Future.wait<void>([
-      Future<void>.delayed(_minSplash),
-      warmup.then<void>((_) {}, onError: (_) {}),
-    ]);
+    // Kick cache-first load; don't wait for slow Railway before leaving splash.
+    // ignore: unused_result
+    ref.read(remoteContentProvider.future);
+    await Future<void>.delayed(_minSplash);
     if (!mounted) return;
     _goHome();
   }
@@ -66,7 +64,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
             child: child,
           );
         },
-        transitionDuration: const Duration(milliseconds: 450),
+        transitionDuration: const Duration(milliseconds: 280),
       ),
     );
   }
@@ -87,11 +85,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
           filterQuality: FilterQuality.high,
         )
             .animate()
-            .fadeIn(duration: 500.ms, curve: Curves.easeOut)
+            .fadeIn(duration: 350.ms, curve: Curves.easeOut)
             .scale(
-              begin: const Offset(0.88, 0.88),
+              begin: const Offset(0.9, 0.9),
               end: const Offset(1, 1),
-              duration: 700.ms,
+              duration: 450.ms,
               curve: Curves.easeOutBack,
             ),
       ),

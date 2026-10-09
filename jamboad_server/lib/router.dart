@@ -162,6 +162,12 @@ Handler buildRouter(Env env, AppDatabase db) {
     '/v1/app/channels',
     withAppAuth(db, (request) => appChannelsHandler(request, db)),
   );
+  router.post('/v1/app/channels/<id>/watch', (Request request, String id) {
+    return withAppAuth(
+      db,
+      (req) => appChannelWatchHandler(req, db, id),
+    )(request);
+  });
   router.get(
     '/v1/app/carousel',
     withAppAuth(db, (request) => appCarouselHandler(request, db)),

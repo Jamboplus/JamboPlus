@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,14 +17,14 @@ String _gateErrorMessage(Object error) {
           error.type == DioExceptionType.connectionTimeout ||
           error.type == DioExceptionType.receiveTimeout)) {
     return 'Haijaweza kuunganishwa na seva.\n\n'
-        '${AppConstants.apiBaseUrl}\n\n'
-        'Angalia mtandao wako, kisha jaribu tena.';
+        'Inajaribu tena kiotomatiki…\n'
+        'Angalia mtandao wako.';
   }
   if (text.contains('Failed host lookup') ||
       text.contains('Connection refused') ||
       text.contains('SocketException')) {
     return 'Haijaweza kuunganishwa na seva.\n\n'
-        '${AppConstants.apiBaseUrl}';
+        'Inajaribu tena kiotomatiki…';
   }
   if (text.contains('401') ||
       text.contains('Invalid signature') ||
@@ -31,15 +33,50 @@ String _gateErrorMessage(Object error) {
         'Wasiliana na admin au jaribu tena.';
   }
   return 'Imeshindwa kupakia maudhui kutoka seva.\n\n'
-      '${AppConstants.apiBaseUrl}';
+      'Inajaribu tena…';
 }
 
 /// Loads all signed content from JamboAd before showing the main app.
-class AppGate extends ConsumerWidget {
+class AppGate extends ConsumerStatefulWidget {
   const AppGate({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AppGate> createState() => _AppGateState();
+}
+
+class _AppGateState extends ConsumerState<AppGate> {
+  Timer? _autoRetry;
+  int _autoAttempts = 0;
+
+  @override
+  void dispose() {
+    _autoRetry?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleAutoRetry() {
+    if (_autoAttempts >= 4) return;
+    if (_autoRetry?.isActive ?? false) return;
+    _autoRetry = Timer(Duration(seconds: 2 + _autoAttempts), () {
+      if (!mounted) return;
+      _autoAttempts += 1;
+      invalidateRemoteContent(ref);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(remoteContentProvider, (prev, next) {
+      next.when(
+        data: (_) {
+          _autoRetry?.cancel();
+          _autoAttempts = 0;
+        },
+        error: (_, _) => _scheduleAutoRetry(),
+        loading: () {},
+      );
+    });
+
     final remote = ref.watch(remoteContentProvider);
     final bootstrap = ref.watch(bootstrapProvider);
 
@@ -68,9 +105,21 @@ class AppGate extends ConsumerWidget {
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    AppConstants.apiBaseUrl,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppColors.textMuted,
+                        ),
+                  ),
                   const SizedBox(height: 20),
                   FilledButton(
-                    onPressed: () => invalidateRemoteContent(ref),
+                    onPressed: () {
+                      _autoRetry?.cancel();
+                      _autoAttempts = 0;
+                      invalidateRemoteContent(ref);
+                    },
                     child: const Text('Jaribu tena'),
                   ),
                 ],

@@ -26,8 +26,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
   int _currentStep = 0;
   bool _isProcessing = false;
   String _processingHint = 'Subiri, inaendelea...';
-  Timer? _pollTimer;
-  int _pollAttempts = 0;
+  bool _pollCancelled = false;
 
   final _nameController = TextEditingController();
   final _nameFocus = FocusNode();
@@ -87,7 +86,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _pollCancelled = true;
     _voiceService.dispose();
     _pageController.dispose();
     _nameController.dispose();
@@ -156,17 +155,8 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
       final storage = ref.read(storageServiceProvider);
       final deviceId = await storage.getOrCreateDeviceId();
 
-      // Bind this device to the paying phone before SonicPesa so unlock
-      // and Mtumiaji profile work even if status polling is delayed.
-      try {
-        await ref.read(userProvider.notifier).submitAccessRequest(
-              name: name,
-              phone: phone,
-            );
-      } catch (_) {
-        // Payment can still proceed; activateAfterPayment retries merge.
-      }
-
+      // Send the USSD push immediately. The server binds this device on start,
+      // so we don't wait for a separate profile save first.
       final started = await api.startPayment(
         name: name,
         phone: phone,
@@ -174,6 +164,8 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
         amount: pkg.price,
         deviceId: deviceId,
       );
+      if (!mounted) return;
+
       final orderId = (started['orderId'] ?? started['order_id'] ?? '')
           .toString()
           .trim();
@@ -181,7 +173,21 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
         throw StateError('Hakuna orderId kutoka seva');
       }
 
-      if (!mounted) return;
+      final alreadyDone = started['completed'] == true ||
+          started['activated'] == true;
+      final alreadyFailed = started['failed'] == true;
+      if (alreadyDone) {
+        await _finishSuccess(_userJsonOf(started));
+        return;
+      }
+      if (alreadyFailed) {
+        await _finishFailure(
+          (started['message'] ?? 'Malipo hayajakamilika. Jaribu tena.')
+              .toString(),
+        );
+        return;
+      }
+
       setState(() {
         _processingHint =
             'Angalia simu yako na weka PIN kukamilisha malipo...';
@@ -190,105 +196,95 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
       await _pollUntilDone(orderId);
     } on DioException catch (e) {
       if (!mounted) return;
-      _pollTimer?.cancel();
+      _pollCancelled = true;
       setState(() => _isProcessing = false);
       await _playVoice('fail');
       final msg = _dioErrorMessage(e);
       if (mounted) _showResultDialog(false, message: msg);
     } catch (_) {
       if (!mounted) return;
-      _pollTimer?.cancel();
+      _pollCancelled = true;
       setState(() => _isProcessing = false);
       await _playVoice('fail');
       if (mounted) _showResultDialog(false);
     }
   }
 
-  Future<void> _pollUntilDone(String orderId) async {
-    _pollTimer?.cancel();
-    _pollAttempts = 0;
-    const maxAttempts = 40; // ~2 minutes at 3s
-    final api = ref.read(apiServiceProvider);
-    final completer = Completer<void>();
+  Map<String, dynamic>? _userJsonOf(Map<String, dynamic> payload) {
+    final userJson = payload['user'];
+    if (userJson is Map) return Map<String, dynamic>.from(userJson);
+    return null;
+  }
 
-    Future<void> tick() async {
-      if (!mounted || completer.isCompleted) return;
-      _pollAttempts += 1;
+  Future<void> _finishSuccess(Map<String, dynamic>? userJson) async {
+    await ref.read(userProvider.notifier).activateAfterPayment(
+          name: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          userJson: userJson,
+        );
+    if (!mounted) return;
+    setState(() => _isProcessing = false);
+    await _playVoice('success');
+    if (!mounted) return;
+    final user = ref.read(userProvider);
+    final remaining =
+        user.hasActiveSubscription ? user.remainingLabel : null;
+    _showResultDialog(
+      true,
+      message: remaining != null && remaining != 'Haijawekwa'
+          ? 'Malipo yamefanikiwa! Premium imeanzishwa ($remaining). Chaneli zimefunguliwa.'
+          : 'Malipo yamefanikiwa! Akaunti yako ya Premium imefunguliwa.',
+    );
+  }
+
+  Future<void> _finishFailure(String message) async {
+    if (!mounted) return;
+    setState(() => _isProcessing = false);
+    await _playVoice('fail');
+    if (mounted) _showResultDialog(false, message: message);
+  }
+
+  Future<void> _pollUntilDone(String orderId) async {
+    _pollCancelled = false;
+    const gap = Duration(milliseconds: 800);
+    const maxWait = Duration(seconds: 90);
+    final deadline = DateTime.now().add(maxWait);
+    final api = ref.read(apiServiceProvider);
+
+    while (mounted && !_pollCancelled && DateTime.now().isBefore(deadline)) {
       try {
         final status = await api.checkPaymentStatus(orderId);
-        final completed = status['completed'] == true ||
-            status['activated'] == true;
+        if (!mounted || _pollCancelled) return;
+
+        final completed =
+            status['completed'] == true || status['activated'] == true;
         final failed = status['failed'] == true;
 
         if (completed) {
-          _pollTimer?.cancel();
-          final userJson = status['user'];
-          await ref.read(userProvider.notifier).activateAfterPayment(
-                name: _nameController.text.trim(),
-                phone: _phoneController.text.trim(),
-                userJson: userJson is Map
-                    ? Map<String, dynamic>.from(userJson)
-                    : null,
-              );
-          if (!mounted) return;
-          setState(() => _isProcessing = false);
-          await _playVoice('success');
-          if (mounted) {
-            final user = ref.read(userProvider);
-            final remaining = user.hasActiveSubscription
-                ? user.remainingLabel
-                : null;
-            _showResultDialog(
-              true,
-              message: remaining != null && remaining != 'Haijawekwa'
-                  ? 'Malipo yamefanikiwa! Premium imeanzishwa ($remaining). Chaneli zimefunguliwa.'
-                  : 'Malipo yamefanikiwa! Akaunti yako ya Premium imefunguliwa.',
-            );
-          }
-          if (!completer.isCompleted) completer.complete();
+          await _finishSuccess(_userJsonOf(status));
           return;
         }
-
         if (failed) {
-          _pollTimer?.cancel();
-          if (!mounted) return;
-          setState(() => _isProcessing = false);
-          await _playVoice('fail');
-          if (mounted) {
-            _showResultDialog(
-              false,
-              message: (status['message'] ??
-                      'Malipo hayajakamilika. Jaribu tena.')
-                  .toString(),
-            );
-          }
-          if (!completer.isCompleted) completer.complete();
+          await _finishFailure(
+            (status['message'] ?? 'Malipo hayajakamilika. Jaribu tena.')
+                .toString(),
+          );
           return;
         }
       } catch (_) {
-        // Keep polling through transient network errors.
+        // Keep checking through a brief network blip.
       }
 
-      if (_pollAttempts >= maxAttempts) {
-        _pollTimer?.cancel();
-        if (!mounted) return;
-        setState(() => _isProcessing = false);
-        await _playVoice('fail');
-        if (mounted) {
-          _showResultDialog(
-            false,
-            message:
-                'Hatukuona uthibitisho wa malipo bado. Ikiwa ulilipa, fungua app tena baada ya dakika chache au wasiliana na msaada.',
-          );
-        }
-        if (!completer.isCompleted) completer.complete();
-      }
+      if (!mounted || _pollCancelled) return;
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) break;
+      await Future<void>.delayed(remaining < gap ? remaining : gap);
     }
 
-    await tick();
-    if (completer.isCompleted) return;
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => tick());
-    await completer.future;
+    if (!mounted || _pollCancelled) return;
+    await _finishFailure(
+      'Hatukuona uthibitisho wa malipo bado. Ikiwa ulilipa, fungua app tena baada ya dakika chache au wasiliana na msaada.',
+    );
   }
 
   String _dioErrorMessage(DioException e) {
@@ -661,7 +657,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen>
               padding: EdgeInsets.all(32),
               child: CircularProgressIndicator(),
             )),
-            error: (_, __) => Text(
+            error: (_, _) => Text(
               'Imeshindwa kupakia bei. Jaribu tena baadae.',
               style: TextStyle(color: AppColors.textSecondary),
             ),

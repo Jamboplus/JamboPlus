@@ -167,6 +167,21 @@ class AdminApi {
     });
   }
 
+  /// Path-based grant/revoke (reliable when body lookup routes are missing).
+  Future<Map<String, dynamic>> setUserAccess(
+    String userId,
+    Map<String, dynamic> body,
+  ) async {
+    return _wrap(() async {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/v1/admin/users/$userId/access',
+        data: body,
+        options: _auth,
+      );
+      return res.data!;
+    });
+  }
+
   Future<void> deleteUser(String id) async {
     return _wrap(() async {
       await _dio.delete('/v1/admin/users/$id', options: _auth);

@@ -146,7 +146,7 @@ class _SlideThumb extends StatelessWidget {
     if (image.isNotEmpty) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: Image.network(image, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fallback()),
+        child: Image.network(image, width: 56, height: 56, fit: BoxFit.cover, errorBuilder: (_, _, _) => _fallback()),
       );
     }
     return _fallback();

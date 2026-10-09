@@ -73,10 +73,11 @@ abstract final class SupportContact {
   static Future<bool> openWhatsApp(
     AppConfigModel? config, {
     List<ChannelModel> channels = const [],
+    String? message,
   }) async {
     final uri = Uri.parse(
       'https://wa.me/${whatsappNumber(config, channels: channels)}'
-      '?text=${Uri.encodeComponent(whatsappMessage(config, channels: channels))}',
+      '?text=${Uri.encodeComponent(message ?? whatsappMessage(config, channels: channels))}',
     );
     if (await canLaunchUrl(uri)) {
       return launchUrl(uri, mode: LaunchMode.externalApplication);

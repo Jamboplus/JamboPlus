@@ -4,6 +4,6 @@ const kChannelCategories = [
   'Tamthilia',
   'Habari',
   'Katuni',
-  'Wanyama',
+  'Trending',
   'Burudani',
 ];

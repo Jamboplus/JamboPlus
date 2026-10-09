@@ -124,7 +124,7 @@ class _EqualizerState extends State<Equalizer> with TickerProviderStateMixin {
           padding: const EdgeInsets.symmetric(horizontal: 1.2),
           child: AnimatedBuilder(
             animation: _cs[i],
-            builder: (_, __) => Container(
+            builder: (_, _) => Container(
               width: 3.2,
               height: widget.height * (0.35 + 0.65 * _cs[i].value),
               decoration: BoxDecoration(
@@ -185,8 +185,8 @@ class ChannelArt extends StatelessWidget {
                 height: height,
                 fit: fit,
                 fadeInDuration: const Duration(milliseconds: 350),
-                placeholder: (_, __) => DecoratedBox(decoration: BoxDecoration(gradient: gradient)),
-                errorWidget: (_, __, ___) => DecoratedBox(
+                placeholder: (_, _) => DecoratedBox(decoration: BoxDecoration(gradient: gradient)),
+                errorWidget: (_, _, _) => DecoratedBox(
                   decoration: BoxDecoration(gradient: gradient),
                   child: const Center(
                     child: Icon(Icons.tv_rounded, color: Colors.white70),

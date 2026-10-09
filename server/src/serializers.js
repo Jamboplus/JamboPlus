@@ -34,6 +34,7 @@ function channelToJson(row) {
     streamUrl: row.stream_url,
     sortOrder: row.sort_order,
     enabled: row.enabled === 1,
+    watchCount: row.watch_count || 0,
   };
   if (row.player_engine != null) json.playerEngine = row.player_engine;
   if (row.drm_type != null) json.drmType = row.drm_type;

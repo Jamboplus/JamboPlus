@@ -1,5 +1,8 @@
 const DEFAULT_BASE = 'https://api.sonicpesa.com';
-const SONICPESA_TIMEOUT_MS = 28_000;
+// Push USSD should be accepted in a few seconds. A long wait just delays the prompt.
+const CREATE_TIMEOUT_MS = 12_000;
+// Status checks run in the background; keep each one short so failures surface quickly.
+const STATUS_TIMEOUT_MS = 5_000;
 const API_ENVELOPE_STATUSES = new Set(['success', 'error', 'failed', 'failure', 'ok']);
 
 function sonicHeaders() {
@@ -137,10 +140,10 @@ function readPaymentStatus(body) {
   );
 }
 
-async function sonicpesaPost(path, payload) {
+async function sonicpesaPost(path, payload, timeoutMs) {
   const base = (process.env.SONICPESA_BASE_URL || DEFAULT_BASE).replace(/\/+$/, '');
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), SONICPESA_TIMEOUT_MS);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(`${base}${path}`, {
       method: 'POST',
@@ -163,35 +166,31 @@ async function sonicpesaPost(path, payload) {
 
 async function sonicpesaCreateOrder(input) {
   const phones = phoneCandidatesForSonic(input.buyer_phone);
+  const list = phones.length ? phones : [input.buyer_phone];
   let last = { ok: false, error: 'SonicPesa did not return an order id' };
 
-  for (const buyer_phone of phones.length ? phones : [input.buyer_phone]) {
-    const posted = await sonicpesaPost('/api/v1/payment/create_order', {
-      ...input,
-      buyer_phone,
-    });
+  for (let i = 0; i < list.length; i += 1) {
+    const buyer_phone = list[i];
+    const posted = await sonicpesaPost(
+      '/api/v1/payment/create_order',
+      { ...input, buyer_phone },
+      CREATE_TIMEOUT_MS,
+    );
+
+    // Timeout or network drop: the prompt may already be on the handset.
+    // Trying another number only adds another long wait and can double-charge the push.
     if (!posted.ok) {
-      last = { ok: false, error: posted.error };
-      continue;
+      return { ok: false, error: posted.error };
     }
 
     const { res, raw } = posted;
     const apiError = sonicpesaApiError(raw, res.status);
-    if (apiError && !res.ok) {
-      last = { ok: false, error: apiError, raw };
-      continue;
-    }
-    if (!res.ok) {
-      last = { ok: false, error: apiError || `SonicPesa HTTP ${res.status}`, raw };
-      continue;
-    }
-
     const body = unwrapSonicpesaBody(raw);
     const orderId = readOrderId(body);
     const paymentStatus = readPaymentStatus(body);
     const wrappedError = sonicpesaApiError(raw, 0);
 
-    if (orderId && !wrappedError) {
+    if (res.ok && orderId && !wrappedError && !apiError) {
       return {
         ok: true,
         order_id: orderId,
@@ -204,18 +203,29 @@ async function sonicpesaCreateOrder(input) {
         raw,
       };
     }
+
     last = {
       ok: false,
-      error: wrappedError || 'SonicPesa did not return an order id',
+      error: apiError || wrappedError || `SonicPesa HTTP ${res.status}`,
       raw,
     };
+
+    // Only the next phone format when Sonic rejected this one quickly (bad MSISDN).
+    const fastReject =
+      (res.status >= 400 && res.status < 500) ||
+      (res.ok && Boolean(wrappedError || !orderId));
+    if (!(i < list.length - 1 && fastReject)) return last;
   }
 
   return last;
 }
 
 async function sonicpesaOrderStatus(orderId) {
-  const posted = await sonicpesaPost('/api/v1/payment/order_status', { order_id: orderId });
+  const posted = await sonicpesaPost(
+    '/api/v1/payment/order_status',
+    { order_id: orderId },
+    STATUS_TIMEOUT_MS,
+  );
   if (!posted.ok) return { ok: false, error: posted.error };
 
   const { res, raw } = posted;

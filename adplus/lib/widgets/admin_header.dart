@@ -71,7 +71,7 @@ class AdminHeader extends StatelessWidget implements PreferredSizeWidget {
                 ],
               ),
             ),
-            if (trailing != null) trailing!,
+            ?trailing,
           ],
         ),
       ),

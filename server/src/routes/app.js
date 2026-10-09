@@ -58,6 +58,14 @@ function createAppRoutes(db) {
     res.json(rows.map(channelToAppJson));
   });
 
+  router.post('/channels/:id/watch', signed, (req, res) => {
+    const result = db
+      .prepare('UPDATE channels SET watch_count = watch_count + 1 WHERE id = ? AND enabled = 1')
+      .run(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Channel not found' });
+    res.status(204).end();
+  });
+
   router.get('/carousel', signed, (_req, res) => {
     const rows = db
       .prepare('SELECT * FROM carousel WHERE enabled = 1 ORDER BY sort_order ASC')

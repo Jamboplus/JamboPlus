@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/core/constants/app_strings.dart';
+import 'package:jamboplus/core/theme/app_colors.dart';
 import 'package:jamboplus/models/channel_model.dart';
 import 'package:jamboplus/providers/carousel_provider.dart';
 import 'package:jamboplus/providers/channel_provider.dart';
@@ -33,7 +34,7 @@ class HomeScreen extends ConsumerWidget {
             await Future.wait([
               ref.read(channelsProvider.future),
               ref.read(carouselProvider.future),
-              ref.read(userProvider.notifier).refresh(),
+              ref.read(userProvider.notifier).refresh(heartbeat: true),
             ]);
           },
           child: CustomScrollView(
@@ -87,22 +88,7 @@ class HomeScreen extends ConsumerWidget {
   ) {
     final query = ref.watch(homeSearchQueryProvider);
     final filter = ref.watch(homeFilterProvider);
-
-    var displayChannels = channels;
-    if (filter != AppStrings.zote) {
-      displayChannels =
-          displayChannels.where((c) => c.category == filter).toList();
-    }
-    if (query.isNotEmpty) {
-      final lower = query.toLowerCase();
-      displayChannels = displayChannels
-          .where(
-            (c) =>
-                c.name.toLowerCase().contains(lower) ||
-                c.description.toLowerCase().contains(lower),
-          )
-          .toList();
-    }
+    final displayChannels = ref.watch(filteredHomeChannelsProvider);
 
     if (filter != AppStrings.zote || query.isNotEmpty) {
       return SliverPadding(
@@ -116,6 +102,18 @@ class HomeScreen extends ConsumerWidget {
               if (index == 0) {
                 return SectionHeader(
                   title: 'Matokeo (${displayChannels.length})',
+                );
+              }
+              if (displayChannels.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Center(
+                    child: Text(
+                      AppStrings.hakunaChaneli,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.textMuted),
+                    ),
+                  ),
                 );
               }
               final channel = displayChannels[index - 1];
@@ -137,7 +135,8 @@ class HomeScreen extends ConsumerWidget {
     final tamthilia = channelsByCategory(channels, AppStrings.tamthilia);
     final habari = channelsByCategory(channels, AppStrings.habari);
     final katuni = channelsByCategory(channels, AppStrings.katuni);
-    final wanyama = channelsByCategory(channels, AppStrings.wanyama);
+    final trending = [...channels]
+      ..sort((a, b) => b.watchCount.compareTo(a.watchCount));
 
     return SliverList(
       delegate: SliverChildListDelegate([
@@ -154,18 +153,14 @@ class HomeScreen extends ConsumerWidget {
           builder: (context) {
             final height = burePairCardHeight(context);
             final width = burePairCardWidth(context);
-            return SizedBox(
+            return GuidedChannelRail(
               height: height,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.only(left: 16, right: 4),
-                itemCount: mpira.length,
-                itemBuilder: (context, index) => ChannelHorizontalCard(
-                  channel: mpira[index],
-                  width: width,
-                  height: height,
-                  onTap: () => openChannel(context, ref, mpira[index]),
-                ),
+              itemCount: mpira.length,
+              itemBuilder: (context, index) => ChannelHorizontalCard(
+                channel: mpira[index],
+                width: width,
+                height: height,
+                onTap: () => openChannel(context, ref, mpira[index]),
               ),
             );
           },
@@ -198,37 +193,141 @@ class HomeScreen extends ConsumerWidget {
           ),
         ),
         SectionHeader(title: AppStrings.katuni),
-        SizedBox(
+        GuidedChannelRail(
           height: 130,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.only(left: 16, right: 4),
-            itemCount: katuni.length,
-            itemBuilder: (context, index) => ChannelHorizontalCard(
-              channel: katuni[index],
-              width: 180,
-              height: 130,
-              onTap: () => openChannel(context, ref, katuni[index]),
-            ),
+          itemCount: katuni.length,
+          itemBuilder: (context, index) => ChannelHorizontalCard(
+            channel: katuni[index],
+            width: 180,
+            height: 130,
+            onTap: () => openChannel(context, ref, katuni[index]),
           ),
         ),
-        SectionHeader(title: AppStrings.wanyama),
-        SizedBox(
+        SectionHeader(title: AppStrings.trending),
+        GuidedChannelRail(
           height: 130,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.only(left: 16, right: 4),
-            itemCount: wanyama.length,
-            itemBuilder: (context, index) => ChannelHorizontalCard(
-              channel: wanyama[index],
-              width: 180,
-              height: 130,
-              onTap: () => openChannel(context, ref, wanyama[index]),
-            ),
+          itemCount: trending.length,
+          itemBuilder: (context, index) => ChannelHorizontalCard(
+            channel: trending[index],
+            width: 180,
+            height: 130,
+            onTap: () => openChannel(context, ref, trending[index]),
           ),
         ),
         const SizedBox(height: AnimatedBottomNav.contentBottomInset),
       ]),
+    );
+  }
+}
+
+class GuidedChannelRail extends StatefulWidget {
+  const GuidedChannelRail({
+    super.key,
+    required this.height,
+    required this.itemCount,
+    required this.itemBuilder,
+  });
+
+  final double height;
+  final int itemCount;
+  final IndexedWidgetBuilder itemBuilder;
+
+  @override
+  State<GuidedChannelRail> createState() => _GuidedChannelRailState();
+}
+
+class _GuidedChannelRailState extends State<GuidedChannelRail> {
+  final _controller = ScrollController();
+  var _showGuide = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealMoreChannels());
+  }
+
+  Future<void> _revealMoreChannels() async {
+    if (!_controller.hasClients || _controller.position.maxScrollExtent <= 0) {
+      if (mounted) setState(() => _showGuide = false);
+      return;
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    if (!mounted || !_controller.hasClients) return;
+    await _controller.animateTo(
+      (_controller.position.maxScrollExtent).clamp(80.0, 150.0),
+      duration: const Duration(milliseconds: 700),
+      curve: Curves.easeInOutCubic,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    if (!mounted || !_controller.hasClients) return;
+    await _controller.animateTo(
+      0,
+      duration: const Duration(milliseconds: 600),
+      curve: Curves.easeOutCubic,
+    );
+    if (mounted) setState(() => _showGuide = false);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: widget.height,
+      child: Stack(
+        children: [
+          ListView.builder(
+            controller: _controller,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(left: 16, right: 4),
+            itemCount: widget.itemCount,
+            itemBuilder: widget.itemBuilder,
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                opacity: _showGuide ? 1 : 0,
+                duration: const Duration(milliseconds: 300),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Container(
+                    padding: const EdgeInsets.only(left: 28, right: 14),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.transparent, AppColors.background],
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Text(
+                          'Telezesha kuona zaidi',
+                          style: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        SizedBox(width: 5),
+                        Icon(
+                          Icons.swipe_rounded,
+                          color: AppColors.primaryCyan,
+                          size: 19,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

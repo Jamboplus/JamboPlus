@@ -61,10 +61,10 @@ class _ChannelGridCardState extends State<ChannelGridCard> {
                     fit: BoxFit.cover,
                     filterQuality: FilterQuality.high,
                     fadeInDuration: const Duration(milliseconds: 200),
-                    placeholder: (_, __) => Container(
+                    placeholder: (_, _) => Container(
                       color: Colors.black12,
                     ),
-                    errorWidget: (_, __, ___) => Container(
+                    errorWidget: (_, _, _) => Container(
                       color: Colors.black26,
                       child: const Icon(
                         Icons.broken_image_outlined,
@@ -194,10 +194,10 @@ class _ChannelHorizontalCardState extends State<ChannelHorizontalCard> {
                   fit: BoxFit.cover,
                   filterQuality: FilterQuality.high,
                   fadeInDuration: const Duration(milliseconds: 200),
-                  placeholder: (_, __) => Container(
+                  placeholder: (_, _) => Container(
                     color: Colors.black12,
                   ),
-                  errorWidget: (_, __, ___) => Container(
+                  errorWidget: (_, _, _) => Container(
                     color: Colors.black26,
                     child: const Icon(
                       Icons.broken_image_outlined,
@@ -327,7 +327,7 @@ class _ChannelListTileState extends State<ChannelListTile> {
                     width: 56,
                     height: 56,
                     fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(
+                    placeholder: (_, _) => Container(
                       width: 56,
                       height: 56,
                       color: AppColors.primaryIndigo.withValues(alpha: 0.1),
