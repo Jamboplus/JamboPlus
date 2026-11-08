@@ -7,6 +7,7 @@ const { createAdminRoutes } = require('./routes/admin');
 const { createPartnerRoutes } = require('./routes/partner');
 const { createPaymentRoutes } = require('./routes/payments');
 const { sonicpesaConfigured } = require('./lib/sonicpesa');
+const { createStoreRoutes } = require('./store/routes');
 
 const db = openDatabase();
 const app = express();
@@ -44,6 +45,9 @@ app.get('/health', (_req, res) => {
     },
   });
 });
+
+// Public AppStore website (/, /app/:slug, /go/:slug, /install/:slug)
+app.use(createStoreRoutes());
 
 app.use('/v1/app', createAppRoutes(db));
 app.use('/v1/app', createPaymentRoutes(db));

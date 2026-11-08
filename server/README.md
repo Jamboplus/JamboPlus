@@ -37,6 +37,24 @@ Copy `.env.example` to `.env` for local runs (`dotenv` loads it automatically).
 
 **Production API:** https://jamboplus-api-production.up.railway.app
 
+## AppStore website (promo for JamboPlus, Washa TV, LeoTena TV)
+
+The same server hosts a mobile-first app store site. Apps/URLs live in `src/store/catalog.js`; icons in `src/store/public/icons/`.
+
+| Path | What it does |
+|------|--------------|
+| `/` | Store home (all apps). `?lang=en` for English, default Kiswahili |
+| `/app/:slug` | App page with **Install** button |
+| `/go/:slug` | **Use this in Facebook ads.** Shows the app briefly, then auto-redirects to Google Play |
+| `/install/:slug` | Instant 302 to Google Play |
+
+Slugs: `jamboplus`, `washatv`, `leotena` (aliases such as `washa-tv`, `leotena-tv` also work; unknown slugs go to `/`).
+`utm_*` params on `/go` and `/install` are forwarded to Play as `referrer`, e.g.
+`/go/washatv?utm_source=facebook&utm_medium=paid&utm_campaign=nov`.
+
+Optional `PUBLIC_BASE_URL` (e.g. `https://your-domain`) forces the absolute URL used in share previews (`og:image`); otherwise it is derived from the request.
+Tests: `npm test`.
+
 ## Railway deployment
 
 ### One-command deploy (recommended)
