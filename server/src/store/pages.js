@@ -3,7 +3,7 @@ const { APPS } = require('./catalog');
 const STRINGS = {
   sw: {
     storeName: 'JamboPlus AppStore',
-    heroTitle: 'Apps zetu za burudani',
+    heroTitle: 'Apps zetu',
     heroSub: 'Pakua apps zetu moja kwa moja kutoka Google Play.',
     install: 'Install',
     installOn: 'Install',
@@ -24,7 +24,7 @@ const STRINGS = {
   },
   en: {
     storeName: 'JamboPlus AppStore',
-    heroTitle: 'Our entertainment apps',
+    heroTitle: 'Our apps',
     heroSub: 'Download our apps straight from Google Play.',
     install: 'Install',
     installOn: 'Install',

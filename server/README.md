@@ -48,7 +48,8 @@ The same server hosts a mobile-first app store site. Apps/URLs live in `src/stor
 | `/go/:slug` | **Use this in Facebook ads.** Shows the app briefly, then auto-redirects to Google Play |
 | `/install/:slug` | Instant 302 to Google Play |
 
-Slugs: `jamboplus`, `washatv`, `leotena` (aliases such as `washa-tv`, `leotena-tv` also work; unknown slugs go to `/`).
+Slugs: `jamboplus`, `washatv`, `leotena`, `dawaasili` (aliases such as `washa-tv`, `leotena-tv`, `dawa-asili` also work; unknown slugs go to `/`).
+To add an app: add an entry to `src/store/catalog.js` and its icons (`<slug>.png` 512px, `<slug>-192.png`) to `src/store/public/icons/`.
 `utm_*` params on `/go` and `/install` are forwarded to Play as `referrer`, e.g.
 `/go/washatv?utm_source=facebook&utm_medium=paid&utm_campaign=nov`.
 

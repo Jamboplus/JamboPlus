@@ -9,6 +9,7 @@ const EXPECTED = {
   jamboplus: 'https://play.google.com/store/apps/details?id=com.jamboplus&pcampaignid=web_share',
   leotena: 'https://play.google.com/store/apps/details?id=com.ghettodevelopers.leotena&pcampaignid=web_share',
   washatv: 'https://play.google.com/store/apps/details?id=com.washatv&pcampaignid=web_share',
+  dawaasili: 'https://play.google.com/store/apps/details?id=com.asilia&pcampaignid=web_share',
 };
 const ALIASES = {
   'jambo-plus': 'jamboplus',
@@ -16,6 +17,8 @@ const ALIASES = {
   'leo-tena': 'leotena',
   'washa-tv': 'washatv',
   washa: 'washatv',
+  'dawa-asili': 'dawaasili',
+  asilia: 'dawaasili',
   LEOTENA: 'leotena',
 };
 
@@ -64,7 +67,7 @@ test('/go/:slug page targets only its own Play URL (meta refresh, button, JS)', 
   }
 });
 
-const NAMES = { jamboplus: 'JamboPlus', washatv: 'Washa TV', leotena: 'LeoTena TV' };
+const NAMES = { jamboplus: 'JamboPlus', washatv: 'Washa TV', leotena: 'LeoTena TV', dawaasili: 'Dawa Asili' };
 
 test('/go page shows ONLY the targeted app (no other app, icon or store link)', async () => {
   for (const slug of Object.keys(EXPECTED)) {
@@ -116,7 +119,7 @@ test('unknown slug never guesses an app — back to store', async () => {
   }
 });
 
-test('home lists all 3 apps with their icons; icons are served', async () => {
+test('home lists all 4 apps with their icons; icons are served', async () => {
   const html = await (await get('/')).text();
   for (const slug of Object.keys(EXPECTED)) {
     assert.ok(html.includes(`/app/${slug}`));

@@ -74,6 +74,40 @@ const APPS = [
       en: ['Movies and Bongo dramas', 'TV shows and anime', 'Match highlights', 'Watch any time'],
     },
   },
+  {
+    slug: 'dawaasili',
+    aliases: ['dawa-asili', 'asilia', 'dawa', 'asili'],
+    packageId: 'com.asilia',
+    name: 'Dawa Asili',
+    category: { sw: 'Elimu', en: 'Education' },
+    playUrl: 'https://play.google.com/store/apps/details?id=com.asilia&pcampaignid=web_share',
+    accent: '#2e7d32',
+    accentText: '#ffffff',
+    tagline: {
+      sw: 'Jifunze tiba asilia, lishe na afya kwa njia ya asili.',
+      en: 'Learn about natural remedies, nutrition and health the traditional way.',
+    },
+    about: {
+      sw: 'Dawa Asili ni programu inayokupa elimu kuhusu mimea ya tiba, matunda, vyakula vya asili, virutubisho na maarifa ya jadi ya Kiafrika kuhusu afya. Imetengenezwa kwa madhumuni ya elimu pekee na si mbadala wa ushauri wa daktari.',
+      en: 'Dawa Asili teaches you about medicinal plants, fruits, natural foods, nutrition and traditional African knowledge about health. It is made for educational purposes only and is not a substitute for medical advice.',
+    },
+    features: {
+      sw: [
+        'Jifunze tiba ya mimea na faida zake bure kabisa',
+        'Jikinze na wabaya dhidi yako kwa mimea tu',
+        'Tiba ya vyakula na matunda',
+        'Ushauri na namna gani ya kujikinga na wabaya',
+        'Dawa pia zinapatikana',
+      ],
+      en: [
+        'Learn herbal remedies and their benefits, completely free',
+        'Protect yourself against those who wish you harm, using plants only',
+        'Remedies from foods and fruits',
+        'Advice on how to protect yourself from harm',
+        'Medicines are also available',
+      ],
+    },
+  },
 ];
 
 const BY_SLUG = new Map();
