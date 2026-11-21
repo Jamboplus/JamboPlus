@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:jamboplus/models/channel_model.dart';
 import 'package:jamboplus/models/playback_source.dart';
 import 'package:jamboplus/models/user_model.dart';
+import 'package:jamboplus/providers/app_config_provider.dart';
 import 'package:jamboplus/providers/user_provider.dart';
 import 'package:jamboplus/providers/service_providers.dart';
 
@@ -21,7 +22,10 @@ class NowPlayingNotifier extends StateNotifier<PlaybackSource?> {
   bool playChannel(ChannelModel channel) {
     final user = _ref.read(userProvider);
     if (channel.isPremium && !user.hasActiveSubscription) return false;
-    state = PlaybackSource.fromChannel(channel);
+    state = PlaybackSource.fromChannel(
+      channel,
+      config: _ref.read(appConfigProvider),
+    );
     _ref.read(apiServiceProvider).recordChannelWatch(channel.id);
     return true;
   }

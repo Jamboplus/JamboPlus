@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="channel_unavailable_message">Kituo hiki hakipatikani kwa sasa.</string>
+    <string name="ok_understood">Sawa</string>
+    <string name="player_live">LIVE</string>
+    <string name="player_play_pause">Play / pause</string>
+</resources>

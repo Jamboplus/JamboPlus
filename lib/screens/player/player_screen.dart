@@ -22,10 +22,18 @@ class PlayerScreen extends ConsumerStatefulWidget {
   const PlayerScreen({super.key});
 
   static Future<void> open(BuildContext context) {
-    return Navigator.of(context).push(PageRouteBuilder(
+    // Start turning before the route is built so the first frame is already
+    // the player, and a zero-length route lets the WebView attach on the tap.
+    unawaited(SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]));
+    unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky));
+    return Navigator.of(context).push(PageRouteBuilder<void>(
       opaque: true,
-      transitionDuration: const Duration(milliseconds: 350),
-      pageBuilder: (_, a, _) => FadeTransition(opacity: a, child: const PlayerScreen()),
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      pageBuilder: (_, _, _) => const PlayerScreen(),
     ));
   }
 
@@ -47,12 +55,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   int _reloadToken = 0;
   bool _humanCheck = false;
   bool _isExiting = false;
-  bool _qualitySwitching = false;
+  String _fitMode = 'kamili';
   bool _defaultsApplied = false;
   DateTime _lastPosUi = DateTime.fromMillisecondsSinceEpoch(0);
   final _streamController = WebStreamController();
   Timer? _hideTimer;
-  Timer? _qualitySwitchTimer;
+  Timer? _rebufferTimer;
+  Timer? _surfaceTimer;
+  Future<void>? _orientationTask;
+  bool _landscapeArmed = false;
 
   static const _langLabels = <String, String>{
     'sw': 'Kiswahili',
@@ -62,26 +73,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   static const _defaultLanguages = <String>['sw', 'en'];
   static const _defaultQualities = <String>['360p', '480p', '720p', '1080p', 'Auto'];
 
-  Future<void> _enterLandscapeMode() async {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    if (!_isExiting) {
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    }
+  Future<void> _runOrientation(Future<void> Function() action) {
+    final previous = _orientationTask ?? Future<void>.value();
+    final next = previous.catchError((_) {}).then((_) => action());
+    _orientationTask = next;
+    return next;
   }
 
-  Future<void> _restorePortraitMode() async {
-    await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      statusBarBrightness: Brightness.dark,
-      systemNavigationBarColor: Color(0xFF00040C),
-      systemNavigationBarIconBrightness: Brightness.light,
-    ));
+  Future<void> _enterLandscapeMode() {
+    if (_landscapeArmed || _isExiting) return Future<void>.value();
+    _landscapeArmed = true;
+    return _runOrientation(() async {
+      await SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      if (!_isExiting) {
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      }
+    });
+  }
+
+  Future<void> _restorePortraitMode() {
+    return _runOrientation(() async {
+      await SystemChrome.setPreferredOrientations(const [
+        DeviceOrientation.portraitUp,
+      ]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: Color(0xFF00040C),
+        systemNavigationBarIconBrightness: Brightness.light,
+      ));
+    });
   }
 
   @override
@@ -95,12 +121,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted && !_isExiting) {
-      unawaited(_enterLandscapeMode());
+      unawaited(_streamController.play());
     }
   }
 
+  @override
+  void didChangeMetrics() {
+    if (!mounted || _isExiting) return;
+    _surfaceTimer?.cancel();
+    _surfaceTimer = Timer(const Duration(milliseconds: 450), () {
+      if (!mounted || _isExiting) return;
+      unawaited(_streamController.play());
+    });
+  }
+
   void _startBuffer() {
-    _qualitySwitchTimer?.cancel();
+    _rebufferTimer?.cancel();
     setState(() {
       _buffering = true;
       _playing = false;
@@ -113,7 +149,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       _qualities = _defaultQualities;
       _languages = _defaultLanguages;
       _playerError = null;
-      _qualitySwitching = false;
+      _fitMode = 'kamili';
       _reloadToken++;
     });
   }
@@ -132,13 +168,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   Future<void> _applySmartDefaults() async {
     if (_defaultsApplied) return;
     _defaultsApplied = true;
-    await _streamController.setLanguage('sw');
+    _quality = '360p';
     await _streamController.setQuality('360p');
+    await _streamController.setLanguage('sw');
   }
 
   void _scheduleHide() {
     _hideTimer?.cancel();
-    _qualitySwitchTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 4), () {
       if (mounted) setState(() => _controls = false);
     });
@@ -153,8 +189,89 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
+    _rebufferTimer?.cancel();
+    _surfaceTimer?.cancel();
     unawaited(_restorePortraitMode());
     super.dispose();
+  }
+
+  void _onPlaybackState({
+    bool? playing,
+    bool? buffering,
+    double? position,
+    double? duration,
+  }) {
+    if (!mounted) return;
+    var nextBuffering = buffering;
+    if (buffering == false) {
+      _rebufferTimer?.cancel();
+      _rebufferTimer = null;
+    } else if (buffering == true && _playing && !_buffering) {
+      // Ignore blips shorter than a moment so the spinner does not flash.
+      _rebufferTimer ??= Timer(const Duration(milliseconds: 600), () {
+        if (!mounted) return;
+        setState(() => _buffering = true);
+      });
+      nextBuffering = null;
+    }
+    final playChanged = playing != null && playing != _playing;
+    final bufChanged = nextBuffering != null && nextBuffering != _buffering;
+    final durChanged = duration != null && duration != _duration;
+    if (!_controls && !playChanged && !bufChanged) return;
+    final now = DateTime.now();
+    final posDue = now.difference(_lastPosUi).inMilliseconds >= 800;
+    final posChanged = position != null && posDue && (position - _position).abs() >= 0.5;
+    if (!playChanged && !bufChanged && !durChanged && !posChanged) return;
+    if (posChanged) _lastPosUi = now;
+    setState(() {
+      if (playing != null) _playing = playing;
+      if (nextBuffering != null) _buffering = nextBuffering;
+      if (position != null && (posChanged || playChanged)) _position = position;
+      if (duration != null) _duration = duration;
+    });
+  }
+
+  void _onQualities(List<String> items) {
+    if (!mounted) return;
+    final merged = _mergeQualities(items);
+    if (listEquals(merged, _qualities)) {
+      _applySmartDefaults();
+      return;
+    }
+    setState(() => _qualities = merged);
+    _applySmartDefaults();
+  }
+
+  void _onLanguages(List<String> items) {
+    if (!mounted) return;
+    if (!listEquals(_languages, _defaultLanguages)) {
+      setState(() => _languages = _defaultLanguages);
+    }
+    _applySmartDefaults();
+  }
+
+  void _onQualityChanged(String value) {
+    if (!mounted || value.isEmpty || value == _quality) return;
+    setState(() => _quality = value);
+  }
+
+  void _onLanguageChanged(String value) {
+    if (!mounted) return;
+    final code = value.toLowerCase().split('-').first;
+    if ((code == 'sw' || code == 'en') && code != _lang) {
+      setState(() => _lang = code);
+    }
+  }
+
+  void _onPlayerError(String message) {
+    if (!mounted) return;
+    _rebufferTimer?.cancel();
+    setState(() {
+      _humanCheck = false;
+      _buffering = false;
+      _playing = false;
+      _playerError = message;
+    });
   }
 
   String _fmt(double seconds) {
@@ -172,9 +289,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     if (_isExiting) return;
     setState(() => _isExiting = true);
     _hideTimer?.cancel();
-    // Let the hybrid WebView detach before changing orientation. This avoids
-    // Android surface races that can crash or leave colored frames behind.
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    _surfaceTimer?.cancel();
+    // Drop the WebView before the orientation change so the decoder surface
+    // is gone and the phone is not left stuck between landscape and portrait.
+    await Future<void>.delayed(const Duration(milliseconds: 280));
     await _restorePortraitMode();
     if (mounted) Navigator.of(context).pop();
   }
@@ -183,7 +301,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     await ChannelSwitcherSheet.show(context, onSwitched: () {
       _startBuffer();
     });
-    if (mounted && !_isExiting) unawaited(_enterLandscapeMode());
+    _scheduleHide();
   }
 
   Future<void> _openLanguagePicker(PlaybackSource src) async {
@@ -195,16 +313,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     );
     if (!mounted) return;
     if (picked != null && picked != _lang) {
-      setState(() {
-        _lang = picked;
-        _buffering = true;
-      });
+      setState(() => _lang = picked);
       await _streamController.setLanguage(picked);
-      await Future<void>.delayed(const Duration(milliseconds: 450));
-      if (mounted) await _streamController.setLanguage(picked);
-      if (mounted) setState(() => _buffering = false);
     }
-    if (mounted && !_isExiting) unawaited(_enterLandscapeMode());
     _scheduleHide();
   }
 
@@ -217,25 +328,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     );
     if (!mounted) return;
     if (picked != null && picked != _quality) {
-      setState(() {
-        _quality = picked;
-        _buffering = true;
-        _qualitySwitching = true;
-      });
+      setState(() => _quality = picked);
       await _streamController.setQuality(picked);
-      if (mounted) {
-        _qualitySwitchTimer?.cancel();
-        _qualitySwitchTimer = Timer(const Duration(milliseconds: 900), () {
-          if (!mounted) return;
-          setState(() {
-            _buffering = false;
-            _qualitySwitching = false;
-          });
-        });
-        _scheduleHide();
-      }
+      if (mounted) _scheduleHide();
     }
-    if (mounted && !_isExiting) unawaited(_enterLandscapeMode());
     _scheduleHide();
   }
 
@@ -266,76 +362,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
         Stack(
           fit: StackFit.expand,
           children: [
-            // Real Shaka web-player surface using the clicked item's URL.
             WebStreamPlayer(
               key: ValueKey('${src.channelId ?? src.title}|${src.url}|$_reloadToken'),
               source: src,
               controller: _streamController,
-              onState: ({
-                bool? playing,
-                bool? buffering,
-                double? position,
-                double? duration,
-              }) {
-                if (!mounted) return;
-                final playChanged = playing != null && playing != _playing;
-                final bufChanged = buffering != null && buffering != _buffering;
-                final durChanged = duration != null && duration != _duration;
-                // While chrome is hidden, ignore scrubber ticks — they only
-                // cause Huawei jank (removeInvalidNode) and GC pressure.
-                if (!_controls && !playChanged && !bufChanged) return;
-                final now = DateTime.now();
-                final posDue = now.difference(_lastPosUi).inMilliseconds >= 800;
-                final posChanged = position != null && posDue && (position - _position).abs() >= 0.5;
-                if (!playChanged && !bufChanged && !durChanged && !posChanged) return;
-                if (posChanged) _lastPosUi = now;
-                setState(() {
-                  if (playing != null) _playing = playing;
-                  if (buffering != null) _buffering = buffering;
-                  if (position != null && (posChanged || playChanged)) _position = position;
-                  if (duration != null) _duration = duration;
-                });
-                if (_qualitySwitching && buffering == false) {
-                  _qualitySwitchTimer?.cancel();
-                  _qualitySwitchTimer = Timer(const Duration(milliseconds: 280), () {
-                    if (!mounted) return;
-                    setState(() {
-                      _buffering = false;
-                      _qualitySwitching = false;
-                    });
-                  });
-                }
-              },
-              onQualities: (items) {
-                if (!mounted) return;
-                final merged = _mergeQualities(items);
-                if (listEquals(merged, _qualities)) {
-                  _applySmartDefaults();
-                  return;
-                }
-                setState(() => _qualities = merged);
-                _applySmartDefaults();
-              },
-              onLanguages: (items) {
-                if (!mounted) return;
-                if (!listEquals(_languages, _defaultLanguages)) {
-                  setState(() => _languages = _defaultLanguages);
-                }
-                _applySmartDefaults();
-              },
-              onQualityChanged: (value) {
-                if (!mounted || value.isEmpty) return;
-                if (!_defaultsApplied && value == 'Auto') return;
-                if (value == _quality) return;
-                setState(() => _quality = value);
-              },
-              onLanguageChanged: (value) {
-                if (!mounted) return;
-                final code = value.toLowerCase().split('-').first;
-                if ((code == 'sw' || code == 'en') && code != _lang) {
-                  setState(() => _lang = code);
-                }
-              },
+              onState: _onPlaybackState,
+              onQualities: _onQualities,
+              onLanguages: _onLanguages,
+              onQualityChanged: _onQualityChanged,
+              onLanguageChanged: _onLanguageChanged,
               onHumanCheck: (needed) {
                 if (!mounted) return;
                 setState(() {
@@ -348,16 +383,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
                   }
                 });
               },
-              onError: (message) {
-                if (!mounted) return;
-                setState(() {
-                  _humanCheck = false;
-                  _buffering = false;
-                  _qualitySwitching = false;
-                  _playing = false;
-                  _playerError = message;
-                });
-              },
+              onError: _onPlayerError,
             ),
 
             // Hybrid WebViews eat Flutter parent GestureDetectors. When
@@ -381,25 +407,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
                     width: 54,
                     height: 54,
                     child: CircularProgressIndicator(strokeWidth: 4, color: PlayerColors.green),
-                  ),
-                ),
-              ),
-
-            if (_qualitySwitching && _playerError == null && !_humanCheck)
-              const Positioned.fill(
-                child: IgnorePointer(
-                  child: ColoredBox(
-                    color: Colors.black,
-                    child: Center(
-                      child: SizedBox(
-                        width: 42,
-                        height: 42,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          color: PlayerColors.green,
-                        ),
-                      ),
-                    ),
                   ),
                 ),
               ),
@@ -442,8 +449,63 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
                   ),
                 ),
               ),
+
+            if (!_humanCheck && _playerError == null) _fitButton(),
           ],
         ),
+        ),
+      ),
+    );
+  }
+
+  void _setFit(String mode) {
+    if (_fitMode == mode) return;
+    setState(() => _fitMode = mode);
+    unawaited(_streamController.setFit(mode));
+  }
+
+  Widget _fitButton() {
+    return Positioned(
+      right: 14,
+      bottom: MediaQuery.paddingOf(context).bottom + 22,
+      child: Material(
+        color: Colors.transparent,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xCC06122A),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _fitChip('Kamili', 'kamili'),
+              _fitChip('Tanua', 'tanua'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fitChip(String label, String mode) {
+    final selected = _fitMode == mode;
+    return GestureDetector(
+      onTap: () => _setFit(mode),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? PlayerColors.green : Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : Colors.white70,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
@@ -1085,7 +1147,7 @@ class QualityPickerSheet extends StatelessWidget {
                   Text('Badili Ubora', style: PlayerTheme.heading(19)),
                   const SizedBox(height: 4),
                   Text(
-                    'Chaguo-msingi ni 360p — bora kwa mtandao wa kawaida',
+                    '360p ndiyo chaguo-msingi. Inacheza bila kuruka ubora. Badilisha tu ukitaka.',
                     style: PlayerTheme.body(12, color: PlayerColors.textHint, weight: FontWeight.w600),
                   ),
                   const SizedBox(height: 16),

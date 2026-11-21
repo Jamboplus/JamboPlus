@@ -1,11 +1,15 @@
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'package:jamboplus/models/playback_source.dart';
+import 'package:jamboplus/player/playback_http_headers.dart';
 
 typedef StreamStateCallback = void Function({
   bool? playing,
@@ -15,18 +19,83 @@ typedef StreamStateCallback = void Function({
 });
 
 class WebStreamController {
-  InAppWebViewController? _web;
+  static const _native = MethodChannel('jamboplus/native_player');
 
-  Future<void> play() => _run('window.leotenaPlayer&&window.leotenaPlayer.play&&window.leotenaPlayer.play()');
-  Future<void> pause() => _run('window.leotenaPlayer&&window.leotenaPlayer.pause&&window.leotenaPlayer.pause()');
-  Future<void> seek(double seconds) =>
-      _run('window.leotenaPlayer&&window.leotenaPlayer.seek&&window.leotenaPlayer.seek(${seconds.isFinite ? seconds : 0})');
-  Future<void> setQuality(String quality) => _run(
-        'window.leotenaPlayer&&window.leotenaPlayer.setQuality&&window.leotenaPlayer.setQuality(${jsonEncode(quality)})',
-      );
-  Future<void> setLanguage(String language) => _run(
-        'window.leotenaPlayer&&window.leotenaPlayer.setLanguage&&window.leotenaPlayer.setLanguage(${jsonEncode(language)})',
-      );
+  InAppWebViewController? _web;
+  bool useNative = false;
+
+  Future<int?> openNative({
+    required String url,
+    required Map<String, String> headers,
+    required String drm,
+    required String clearKey,
+    required String licenseUrl,
+    String quality = '360p',
+    String language = 'sw',
+  }) async {
+    final id = await _native.invokeMethod<int>('open', {
+      'url': url,
+      'headers': headers,
+      'drm': drm,
+      'clearKey': clearKey,
+      'licenseUrl': licenseUrl,
+      'quality': quality,
+      'language': language,
+    });
+    return id;
+  }
+
+  Future<void> disposeNative(int textureId) async {
+    try {
+      await _native.invokeMethod<void>('dispose', {'textureId': textureId});
+    } catch (_) {}
+  }
+
+  Future<void> play() {
+    if (useNative) return _nativeCall('play');
+    return _run('window.leotenaPlayer&&window.leotenaPlayer.play&&window.leotenaPlayer.play()');
+  }
+
+  Future<void> pause() {
+    if (useNative) return _nativeCall('pause');
+    return _run('window.leotenaPlayer&&window.leotenaPlayer.pause&&window.leotenaPlayer.pause()');
+  }
+
+  Future<void> seek(double seconds) {
+    if (useNative) {
+      return _nativeCall('seek', {'seconds': seconds.isFinite ? seconds : 0});
+    }
+    return _run(
+      'window.leotenaPlayer&&window.leotenaPlayer.seek&&window.leotenaPlayer.seek(${seconds.isFinite ? seconds : 0})',
+    );
+  }
+
+  Future<void> setQuality(String quality) {
+    if (useNative) return _nativeCall('setQuality', {'quality': quality});
+    return _run(
+      'window.leotenaPlayer&&window.leotenaPlayer.setQuality&&window.leotenaPlayer.setQuality(${jsonEncode(quality)})',
+    );
+  }
+
+  Future<void> setFit(String mode) {
+    final fit = mode == 'tanua' ? 'tanua' : 'kamili';
+    return _run(
+      'window.leotenaSetFit&&window.leotenaSetFit(${jsonEncode(fit)})',
+    );
+  }
+
+  Future<void> setLanguage(String language) {
+    if (useNative) return _nativeCall('setLanguage', {'language': language});
+    return _run(
+      'window.leotenaPlayer&&window.leotenaPlayer.setLanguage&&window.leotenaPlayer.setLanguage(${jsonEncode(language)})',
+    );
+  }
+
+  Future<void> _nativeCall(String method, [Map<String, Object?>? args]) async {
+    try {
+      await _native.invokeMethod<void>(method, args);
+    } catch (_) {}
+  }
 
   Future<void> _run(String source) async {
     try {
@@ -77,6 +146,14 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
   bool get _isMediaStream => _looksLikeMediaUrl(widget.source.url);
   Widget? _cachedView;
   String? _cachedUrl;
+  final Dio _streamProxy = Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 12),
+      receiveTimeout: const Duration(seconds: 20),
+      followRedirects: true,
+      validateStatus: (code) => code != null && code < 500,
+    ),
+  );
 
   // Stable callback slots so the platform WebView is not rebuilt on every
   // parent setState (that rebuild cycle causes Huawei jank / "scratches").
@@ -87,6 +164,12 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
   late ValueChanged<String> _onLanguageChanged = widget.onLanguageChanged;
   late ValueChanged<String> _onError = widget.onError;
   late ValueChanged<bool> _onHumanCheck = widget.onHumanCheck;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.useNative = false;
+  }
 
   @override
   void didUpdateWidget(covariant WebStreamPlayer oldWidget) {
@@ -136,6 +219,11 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
     // Hybrid composition is required for video frames on many Huawei devices.
     // Texture/VirtualDisplay often yields audio-only (blank picture).
     const hybrid = true;
+    final headers = widget.source.headers.isNotEmpty
+        ? widget.source.headers
+        : mergePlaybackHeaders(url);
+    final userAgent = _headerValue(headers, 'User-Agent') ?? playbackChromeUserAgent;
+    final pageOrigin = Uri.tryParse(url)?.origin ?? '';
 
     final settings = InAppWebViewSettings(
       javaScriptEnabled: true,
@@ -159,8 +247,8 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       hardwareAcceleration: true,
       preferredContentMode: UserPreferredContentMode.MOBILE,
       cacheEnabled: true,
-      userAgent:
-          'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      userAgent: userAgent,
+      useShouldInterceptRequest: !_isMediaStream,
     );
 
     return ColoredBox(
@@ -171,16 +259,13 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
             ? null
             : URLRequest(
                 url: WebUri(url),
-                headers: {
-                  'Referer': _pageOrigin(url),
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                },
+                headers: _webViewLoadHeaders(headers),
               ),
         initialData: _isMediaStream
             ? InAppWebViewInitialData(
-                data: _shakaHtml(widget.source),
-                baseUrl: WebUri(_pageOrigin(url)),
-                historyUrl: WebUri(_pageOrigin(url)),
+                data: _shakaHtml(widget.source, headers),
+                baseUrl: WebUri(_documentBase(url, headers)),
+                historyUrl: WebUri(_documentBase(url, headers)),
                 mimeType: 'text/html',
                 encoding: 'utf-8',
               )
@@ -193,6 +278,57 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
                   source: r'''
 (function () {
   window.__leotenaShakas = window.__leotenaShakas || [];
+
+  // The live file lives on another host and sends no CORS header, so fetch()
+  // dies and the picture stops. Ask for it on this page's own origin; Flutter
+  // loads the real bytes and the browser treats them as same-origin.
+  function leotenaShouldProxy(raw) {
+    try {
+      var u = new URL(raw, location.href);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+      if (u.host === location.host) return false;
+      var path = u.pathname.toLowerCase();
+      if (/\.(m3u8|m3u|mpd|ts|mp4|m4v|mkv|webm|aac|pdf)$/.test(path)) return true;
+      if (/\/\d{6,}\/\d{6,}\//.test(path)) return true;
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+  function leotenaWrap(raw) {
+    var abs = new URL(raw, location.href).href;
+    return location.origin + '/__leotena_proxy?src=' + encodeURIComponent(abs);
+  }
+  function leotenaUrlOf(input) {
+    if (!input) return '';
+    if (typeof input === 'string') return input;
+    if (input.url) return String(input.url);
+    try { return String(input); } catch (e) { return ''; }
+  }
+  var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+  if (nativeFetch) {
+    window.fetch = function (input, init) {
+      try {
+        var url = leotenaUrlOf(input);
+        if (url && leotenaShouldProxy(url)) {
+          var wrapped = leotenaWrap(url);
+          if (typeof input === 'string' || !input.url) return nativeFetch(wrapped, init);
+          return nativeFetch(new Request(wrapped, input), init);
+        }
+      } catch (e) {}
+      return nativeFetch(input, init);
+    };
+  }
+  var nativeOpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url) {
+    var next = url;
+    try {
+      if (typeof url === 'string' && leotenaShouldProxy(url)) next = leotenaWrap(url);
+    } catch (e) {}
+    var args = [method, next];
+    for (var i = 2; i < arguments.length; i++) args.push(arguments[i]);
+    return nativeOpen.apply(this, args);
+  };
   function patchRecaptcha(api) {
     if (!api || api.__leotenaPatched) return api;
     try {
@@ -265,12 +401,16 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
 })();
 ''',
                   injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                  forMainFrameOnly: false,
                 ),
               ]),
         onWebViewCreated: (controller) {
           widget.controller._web = controller;
           _bindHandlers(controller);
         },
+        shouldInterceptRequest: _isMediaStream
+            ? null
+            : (_, request) => _proxyBlockedStream(request, pageOrigin, userAgent),
         onLoadStart: (_, _) {
           _onState(playing: false, buffering: true);
         },
@@ -329,6 +469,103 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
         },
       ),
     );
+  }
+
+  /// The channel page fetches the live playlist from another host. That host
+  /// sends no CORS header, so the WebView blocks it and the decoder resets.
+  /// Load the bytes here and hand them back with the page's origin allowed.
+  Future<WebResourceResponse?> _proxyBlockedStream(
+    WebResourceRequest request,
+    String pageOrigin,
+    String userAgent,
+  ) async {
+    final wrapped = _leotenaProxyTarget(request.url);
+    final Uri? target;
+    if (wrapped != null) {
+      target = wrapped;
+    } else {
+      if (request.isForMainFrame == true) return null;
+      final uri = request.url;
+      if (uri.scheme != 'http' && uri.scheme != 'https') return null;
+      final page = Uri.tryParse(pageOrigin);
+      if (page != null && uri.host == page.host) return null;
+      if (!_isCrossOriginStream(uri)) return null;
+      target = uri;
+    }
+
+    final origin = _requestHeader(request.headers, 'origin') ?? pageOrigin;
+    final allowOrigin = origin.isEmpty ? pageOrigin : origin;
+    final method = (request.method ?? 'GET').toUpperCase();
+    if (method == 'OPTIONS') {
+      return _corsBytes(
+        statusCode: 204,
+        reasonPhrase: 'No Content',
+        mime: 'text/plain',
+        bytes: Uint8List(0),
+        allowOrigin: allowOrigin,
+        extra: const {
+          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+          'Access-Control-Allow-Headers': '*',
+          'Access-Control-Max-Age': '600',
+        },
+      );
+    }
+
+    final headers = <String, dynamic>{
+      'User-Agent': userAgent,
+      'Accept': _requestHeader(request.headers, 'accept') ?? '*/*',
+      'Referer': _requestHeader(request.headers, 'referer') ?? '$pageOrigin/',
+    };
+    if (allowOrigin.isNotEmpty) headers['Origin'] = allowOrigin;
+    final range = _requestHeader(request.headers, 'range');
+    if (range != null) headers['Range'] = range;
+
+    try {
+      final response = await _streamProxy.get<List<int>>(
+        target.toString(),
+        options: Options(responseType: ResponseType.bytes, headers: headers),
+      );
+      final bytes = Uint8List.fromList(response.data ?? const <int>[]);
+      final rawType = response.headers.value('content-type') ?? 'application/octet-stream';
+      final mime = _streamMime(bytes, rawType.split(';').first.trim());
+      final status = response.statusCode ?? 200;
+      if ((status >= 300 && status < 400) || status < 100 || status > 599) {
+        if (wrapped == null) return null;
+        return _corsBytes(
+          statusCode: 502,
+          reasonPhrase: 'Bad Gateway',
+          mime: 'text/plain',
+          bytes: Uint8List(0),
+          allowOrigin: allowOrigin,
+        );
+      }
+      final extra = <String, String>{};
+      final contentRange = response.headers.value('content-range');
+      if (contentRange != null) extra['Content-Range'] = contentRange;
+      final acceptRanges = response.headers.value('accept-ranges');
+      if (acceptRanges != null) extra['Accept-Ranges'] = acceptRanges;
+      if (kDebugMode) {
+        debugPrint('WebPlayer: proxy ${target.host} $status ${bytes.length}b');
+      }
+      return _corsBytes(
+        statusCode: status == 0 ? 200 : status,
+        reasonPhrase: status == 206 ? 'Partial Content' : 'OK',
+        mime: mime,
+        bytes: bytes,
+        allowOrigin: allowOrigin,
+        extra: extra,
+      );
+    } catch (error) {
+      if (kDebugMode) debugPrint('WebPlayer: proxy fail ${target.host} $error');
+      if (wrapped == null) return null;
+      return _corsBytes(
+        statusCode: 502,
+        reasonPhrase: 'Bad Gateway',
+        mime: 'text/plain',
+        bytes: Uint8List(0),
+        allowOrigin: allowOrigin,
+      );
+    }
   }
 
   void _bindHandlers(InAppWebViewController controller) {
@@ -468,11 +705,24 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
   var css = document.createElement('style');
   css.textContent = [
     'html,body{margin:0!important;padding:0!important;width:100%!important;height:100%!important;overflow:hidden!important;background:#000!important}',
-    'iframe,video,.video-js,player,.player,#player,#vjs_video_3,canvas{position:fixed!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;border:0!important;object-fit:cover!important;background:#000!important;z-index:1!important;opacity:1!important;visibility:visible!important}',
+    'iframe,video,.video-js,player,.player,#player,#vjs_video_3,canvas{position:fixed!important;inset:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;border:0!important;background:#000!important;z-index:1!important;opacity:1!important;visibility:visible!important}',
+    'video,canvas{object-fit:contain!important;object-position:center center!important;transform:none!important}',
     'video{pointer-events:none!important}',
     'header,nav,footer,.ads,.ad,.banner,.navbar,.top-bar,.bottom-bar{display:none!important}'
   ].join('');
   document.documentElement.appendChild(css);
+
+  window.leotenaSetFit = function (mode) {
+    var fit = mode === 'tanua' ? 'cover' : 'contain';
+    var tag = document.getElementById('leotena-fit');
+    if (!tag) {
+      tag = document.createElement('style');
+      tag.id = 'leotena-fit';
+      document.documentElement.appendChild(tag);
+    }
+    tag.textContent = 'video,canvas,.video-js{object-fit:' + fit + '!important;object-position:center center!important;transform:none!important}';
+  };
+  window.leotenaSetFit('kamili');
 
   function pickVideo() {
     return document.querySelector('video');
@@ -563,13 +813,16 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
         emitTracks('Auto');
         return true;
       }
-      var target = parseInt(value, 10) || 360;
+      var target = parseInt(value, 10) || 480;
       var tracks = player.getVariantTracks() || [];
       var chosen = pickClosest(tracks, target);
       if (!chosen) return false;
-      player.configure({ abr: { enabled: false, restrictions: { maxHeight: 2160 } } });
-      // Keep the current decoded frame while switching tracks. Clearing the
-      // buffer here causes colored flashes and line artifacts on Android WebView.
+      var active = tracks.filter(function (tr) { return tr.active; })[0];
+      player.configure({ abr: { enabled: false, restrictions: { maxHeight: target, maxBandwidth: target <= 480 ? 1600000 : 8000000 } } });
+      if (active && Math.abs(trackHeight(active) - trackHeight(chosen)) <= 40) {
+        emitTracks(trackHeight(active) + 'p');
+        return true;
+      }
       try { player.selectVariantTrack(chosen, false); }
       catch (_) { try { player.selectVariantTrack(chosen, false); } catch (__) {} }
       emitTracks(trackHeight(chosen) + 'p');
@@ -605,19 +858,6 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
     var player = getShaka();
     if (player) {
       try { player.selectAudioLanguage(code); } catch (_) {}
-      try {
-        var tracks = player.getVariantTracks() || [];
-        var langTracks = tracks.filter(function (tr) { return languageCode(tr.language) === code; });
-        if (langTracks.length) {
-          var active = tracks.filter(function (tr) { return tr.active; })[0];
-          var target = active ? trackHeight(active) : 360;
-          var chosen = pickClosest(langTracks, target);
-          if (chosen) {
-            player.configure({ abr: { enabled: false } });
-            try { player.selectVariantTrack(chosen, true); } catch (_) {}
-          }
-        }
-      } catch (_) {}
       emitTracks(null, code);
       return;
     }
@@ -644,11 +884,11 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
     },
     seek: function () {},
     setQuality: function (value) {
+      userChoseQuality = true;
       if (applyShakaQuality(value)) return;
       if (applyHlsQuality(value)) return;
-      // Retry shortly — embed Shaka may not be ready on first tap.
       setTimeout(function () {
-        if (!applyShakaQuality(value, true)) applyHlsQuality(value);
+        if (!applyShakaQuality(value)) applyHlsQuality(value);
       }, 400);
     },
     setLanguage: function (value) {
@@ -662,7 +902,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       if (window.flutter_inappwebview) {
         window.flutter_inappwebview.callHandler('playerState', {
           playing: v ? (!v.paused && !v.ended) : true,
-          buffering: v ? (v.readyState < 3) : false,
+          buffering: v ? (v.readyState < 2) : false,
           position: v && isFinite(v.currentTime) ? v.currentTime : 0,
           duration: v && isFinite(v.duration) ? v.duration : 0
         });
@@ -671,17 +911,18 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
   }
 
   emitTracks('360p', 'sw');
-  // Apply defaults once Shaka exists.
-  var waits = 0;
-  var readyTimer = setInterval(function () {
-    waits++;
-    if (getShaka() || waits > 40) {
-      clearInterval(readyTimer);
-      applyShakaQuality('360p', false);
-      applyLanguage('sw');
-      emitTracks('360p', 'sw');
+
+  var userChoseQuality = false;
+  var lockTries = 0;
+  var lockTimer = setInterval(function () {
+    if (userChoseQuality || ++lockTries > 12) {
+      clearInterval(lockTimer);
+      return;
     }
-  }, 250);
+    if (applyShakaQuality('360p') || applyHlsQuality('360p')) {
+      clearInterval(lockTimer);
+    }
+  }, 700);
 
   var v = pickVideo();
   if (v) {
@@ -697,8 +938,9 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
     } catch (_) {}
   }
 
-  String _shakaHtml(PlaybackSource source) {
+  String _shakaHtml(PlaybackSource source, Map<String, String> headers) {
     final sourceJson = jsonEncode(source.url.trim());
+    final headersJson = jsonEncode(headers);
     final clearKeys = <String, String>{};
     if (source.drm == ChannelDrm.clearkey) {
       final parts = source.clearKey.split(':');
@@ -719,7 +961,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
   <style>
     html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
-    video{position:fixed;inset:0;width:100vw;height:100vh;object-fit:cover;background:#000;pointer-events:none}
+    video{position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;object-position:center;background:#000;pointer-events:none}
   </style>
   <script src="https://cdn.jsdelivr.net/npm/shaka-player@4.16.12/dist/shaka-player.compiled.js"></script>
 </head>
@@ -732,6 +974,8 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
     let started = false;
     let preferredLang = 'sw';
     let preferredQuality = '360p';
+    let isBuffering = true;
+    const requestHeaders = $headersJson;
 
     function call(name, payload) {
       try {
@@ -740,6 +984,9 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
         }
       } catch (_) {}
     }
+    window.leotenaSetFit = function (mode) {
+      video.style.objectFit = mode === 'tanua' ? 'cover' : 'contain';
+    };
     function errorText(error) {
       if (!error) return 'Video haikuweza kuchezwa.';
       if (error.detail) error = error.detail;
@@ -751,7 +998,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       lastStateAt = now;
       call('playerState', {
         playing: !video.paused && !video.ended,
-        buffering: video.readyState < 3,
+        buffering: isBuffering,
         position: Number.isFinite(video.currentTime) ? video.currentTime : 0,
         duration: Number.isFinite(video.duration) ? video.duration : 0
       });
@@ -809,24 +1056,35 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
     }
     function applyQuality(value, clearBuffer) {
       if (!player) return false;
-      preferredQuality = value || '360p';
+      preferredQuality = value || 'Auto';
       if (preferredQuality === 'Auto') {
         player.configure({
-          abr: { enabled: true, restrictions: { maxHeight: 1080 }, defaultBandwidthEstimate: 800000 }
+          abr: {
+            enabled: true,
+            switchInterval: 24,
+            bandwidthUpgradeTarget: 0.95,
+            bandwidthDowngradeTarget: 0.75,
+            restrictions: { maxHeight: 720, maxBandwidth: 3500000 }
+          }
         });
         return true;
       }
       const target = parseInt(preferredQuality, 10) || 360;
-      // Lift any start-up height cap so 720p/1080p can be selected.
-      player.configure({ abr: { enabled: false, restrictions: { maxHeight: 2160 } } });
+      player.configure({
+        abr: { enabled: false, restrictions: { maxHeight: target, maxBandwidth: target <= 360 ? 900000 : (target <= 480 ? 1600000 : 8000000) } }
+      });
       const pool = tracksForLang(preferredLang);
       const chosen = pickClosestTrack(pool, target);
       if (!chosen) return false;
+      const active = (player.getVariantTracks() || []).find(track => track.active);
+      if (active && Math.abs(trackHeight(active) - trackHeight(chosen)) <= 40) {
+        preferredQuality = trackHeight(active) + 'p';
+        return true;
+      }
       try {
-        // Do not clear the active buffer during a user quality change.
         player.selectVariantTrack(chosen, false);
       } catch (_) {
-        try { player.selectVariantTrack(chosen, false); } catch (__) { return false; }
+        return false;
       }
       preferredQuality = trackHeight(chosen) + 'p';
       return true;
@@ -835,7 +1093,6 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       if (!player) return;
       preferredLang = (value === 'en') ? 'en' : 'sw';
       try { player.selectAudioLanguage(preferredLang); } catch (_) {}
-      applyQuality(preferredQuality, false);
     }
 
     window.leotenaPlayer = {
@@ -854,8 +1111,16 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       }
     };
 
-    ['play','pause','playing','waiting','stalled','seeking','seeked','timeupdate','durationchange','ended']
+    video.addEventListener('waiting', () => { isBuffering = true; emitState(true); });
+    video.addEventListener('playing', () => { isBuffering = false; emitState(true); });
+    video.addEventListener('canplay', () => { isBuffering = false; emitState(true); });
+    ['play','pause','seeking','seeked','timeupdate','durationchange','ended']
       .forEach(name => video.addEventListener(name, () => emitState(name !== 'timeupdate')));
+
+    function isAdaptiveUrl(url) {
+      var u = String(url || '').toLowerCase().split('?')[0].split('#')[0];
+      return u.endsWith('.m3u8') || u.endsWith('.m3u') || u.endsWith('.mpd') || u.indexOf('m3u8') !== -1;
+    }
 
     async function loadNative() {
       video.removeAttribute('src');
@@ -867,7 +1132,7 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
       call('playerTracks', {
         qualities: ['360p','480p','720p','1080p','Auto'],
         languages: ['sw','en'],
-        activeQuality: '360p',
+        activeQuality: 'Auto',
         activeLanguage: 'sw'
       });
     }
@@ -880,49 +1145,70 @@ class _WebStreamPlayerState extends State<WebStreamPlayer> {
         if (!shaka.Player.isBrowserSupported()) throw new Error('Kifaa hiki hakitumii Shaka Player.');
         player = new shaka.Player();
         await player.attach(video);
+        player.getNetworkingEngine().registerRequestFilter(function(type, request) {
+          Object.keys(requestHeaders || {}).forEach(function(key) {
+            var value = requestHeaders[key];
+            if (value == null || value === '') return;
+            try { request.headers[key] = String(value); } catch (e) {}
+          });
+          if (type === shaka.net.NetworkingEngine.RequestType.MANIFEST && !request.headers['Accept']) {
+            request.headers['Accept'] = 'application/dash+xml,application/vnd.apple.mpegurl,*/*';
+          }
+        });
         player.addEventListener('error', event => {
-          loadNative().catch(() => call('playerError', errorText(event)));
+          var detail = event && event.detail ? event.detail : event;
+          var fatal = !detail || detail.severity === 2;
+          if (!started && !isAdaptiveUrl($sourceJson)) {
+            loadNative().catch(() => call('playerError', errorText(event)));
+            return;
+          }
+          if (fatal) call('playerError', errorText(event));
         });
         player.addEventListener('trackschanged', emitTracks);
         player.addEventListener('variantchanged', emitTracks);
         player.addEventListener('adaptation', emitTracks);
-        player.addEventListener('buffering', event => call('playerState', {
-          playing: !video.paused,
-          buffering: !!event.buffering,
-          position: video.currentTime || 0,
-          duration: Number.isFinite(video.duration) ? video.duration : 0
-        }));
+        player.addEventListener('buffering', event => {
+          isBuffering = !!event.buffering;
+          call('playerState', {
+            playing: !video.paused,
+            buffering: isBuffering,
+            position: video.currentTime || 0,
+            duration: Number.isFinite(video.duration) ? video.duration : 0
+          });
+        });
         player.configure({
           abr: {
             enabled: false,
-            defaultBandwidthEstimate: 600000,
-            restrictions: { maxHeight: 360 }
+            restrictions: { maxHeight: 360, maxBandwidth: 900000 }
           },
           preferredAudioLanguage: 'sw',
           preferredTextLanguage: 'sw',
           streaming: {
-            // Slightly deeper buffer = fewer scratches on unstable mobile nets.
-            rebufferingGoal: 1.5,
-            bufferingGoal: 8,
-            bufferBehind: 20,
+            bufferingGoal: 40,
+            rebufferingGoal: 4,
+            bufferBehind: 30,
             stallEnabled: true,
-            retryParameters: { maxAttempts: 4, baseDelay: 250, backoffFactor: 1.6, timeout: 15000 }
+            stallThreshold: 0.5,
+            gapDetectionThreshold: 0.5,
+            retryParameters: { maxAttempts: 8, baseDelay: 400, backoffFactor: 1.5, timeout: 20000 }
           },
           manifest: {
-            retryParameters: { maxAttempts: 4, baseDelay: 250, backoffFactor: 1.6, timeout: 12000 }
+            retryParameters: { maxAttempts: 8, baseDelay: 400, backoffFactor: 1.5, timeout: 15000 }
           },
           drm: { clearKeys: $clearKeysJson }
         });
         await player.load($sourceJson);
         started = true;
-        applyLanguage('sw');
+        isBuffering = false;
         applyQuality('360p', false);
-        // Allow picking higher ladders after the 360p start stick.
-        try { player.configure({ abr: { restrictions: { maxHeight: 1080 } } }); } catch (_) {}
         emitTracks();
         emitState(true);
         await unmutePlay();
       } catch (error) {
+        if (isAdaptiveUrl($sourceJson)) {
+          call('playerError', errorText(error));
+          return;
+        }
         try {
           if (player) { try { await player.destroy(); } catch (_) {} player = null; }
           await loadNative();
@@ -985,6 +1271,122 @@ String _pageOrigin(String raw) {
   }
   return '${uri.scheme}://${uri.host}/';
 }
+
+String? _headerValue(Map<String, String> headers, String name) {
+  for (final entry in headers.entries) {
+    if (entry.key.toLowerCase() == name.toLowerCase() && entry.value.trim().isNotEmpty) {
+      return entry.value.trim();
+    }
+  }
+  return null;
+}
+
+/// WebView rejects several default headers, including Origin. User-Agent is
+/// set on the WebView. Referer is sent with the gateway page request.
+Map<String, String> _webViewLoadHeaders(Map<String, String> headers) {
+  const drop = {
+    'connection',
+    'user-agent',
+    'host',
+    'content-length',
+    'accept-encoding',
+    'keep-alive',
+    'origin',
+  };
+  return {
+    for (final entry in headers.entries)
+      if (!drop.contains(entry.key.toLowerCase()) && entry.value.trim().isNotEmpty)
+        entry.key: entry.value,
+  };
+}
+
+/// Same-origin stand-in created by the page script: `/__leotena_proxy?src=`.
+Uri? _leotenaProxyTarget(Uri uri) {
+  if (!uri.path.contains('__leotena_proxy')) return null;
+  final src = uri.queryParameters['src'];
+  if (src == null || src.isEmpty) return null;
+  final target = Uri.tryParse(src);
+  if (target == null) return null;
+  if (target.scheme != 'http' && target.scheme != 'https') return null;
+  if (target.host.isEmpty) return null;
+  return target;
+}
+
+String _streamMime(Uint8List bytes, String serverMime) {
+  final sample = bytes.length < 24 ? bytes.length : 24;
+  if (sample > 0) {
+    final head = utf8.decode(bytes.sublist(0, sample), allowMalformed: true).trimLeft();
+    if (head.startsWith('#EXTM3U') || head.startsWith('#EXT')) {
+      return 'application/vnd.apple.mpegurl';
+    }
+  }
+  if (bytes.isNotEmpty && bytes[0] == 0x47) return 'video/mp2t';
+  if (serverMime.isEmpty) return 'application/octet-stream';
+  return serverMime;
+}
+
+bool _isCrossOriginStream(Uri uri) {
+  final path = uri.path.toLowerCase();
+  const extensions = [
+    '.m3u8',
+    '.m3u',
+    '.mpd',
+    '.ts',
+    '.mp4',
+    '.m4v',
+    '.mkv',
+    '.webm',
+    '.aac',
+  ];
+  for (final extension in extensions) {
+    if (path.endsWith(extension)) return true;
+  }
+  return RegExp(r'/\d{6,}/\d{6,}/').hasMatch(uri.path);
+}
+
+String? _requestHeader(Map<String, String>? headers, String name) {
+  if (headers == null) return null;
+  for (final entry in headers.entries) {
+    if (entry.key.toLowerCase() == name && entry.value.trim().isNotEmpty) {
+      return entry.value;
+    }
+  }
+  return null;
+}
+
+WebResourceResponse _corsBytes({
+  required int statusCode,
+  required String reasonPhrase,
+  required String mime,
+  required Uint8List bytes,
+  required String allowOrigin,
+  Map<String, String> extra = const {},
+}) {
+  return WebResourceResponse(
+    contentType: mime,
+    contentEncoding: null,
+    data: bytes,
+    statusCode: statusCode,
+    reasonPhrase: reasonPhrase,
+    headers: {
+      'Access-Control-Allow-Origin': allowOrigin,
+      'Access-Control-Allow-Credentials': 'true',
+      ...extra,
+    },
+  );
+}
+
+String _documentBase(String url, Map<String, String> headers) {
+  final origin = _headerValue(headers, 'Origin');
+  if (origin != null) {
+    final parsed = Uri.tryParse(origin);
+    if (parsed != null && parsed.hasScheme && parsed.host.isNotEmpty) {
+      return origin.endsWith('/') ? origin : '$origin/';
+    }
+  }
+  return _pageOrigin(url);
+}
+
 
 class _PlayerMessage extends StatelessWidget {
   final IconData icon;

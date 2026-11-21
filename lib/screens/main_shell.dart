@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:jamboplus/models/playback_source.dart';
+import 'package:jamboplus/player/native_washa_player.dart';
 import 'package:jamboplus/models/channel_model.dart';
 import 'package:jamboplus/providers/app_config_provider.dart';
 import 'package:jamboplus/providers/now_playing_provider.dart';
@@ -130,7 +132,17 @@ void openChannel(BuildContext context, WidgetRef ref, ChannelModel channel) {
     return;
   }
   ref.read(nowPlayingProvider.notifier).playChannel(channel);
-  PlayerScreen.open(context);
+  final source = ref.read(nowPlayingProvider);
+  if (source == null) return;
+  if (NativeWashaPlayer.supported) {
+    unawaited(NativeWashaPlayer.open(source));
+    return;
+  }
+  unawaited(() async {
+    final prepared = await preparePlaybackSource(source);
+    ref.read(nowPlayingProvider.notifier).play(prepared);
+    if (context.mounted) PlayerScreen.open(context);
+  }());
 }
 
 void showChannelSnackBar(BuildContext context, String name) {
